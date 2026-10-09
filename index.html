@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trading Pro - Dashboard</title>
+    <!-- Tailwind CSS para el prototipado rápido -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+    <!-- TradingView Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    
+    <!-- Navbar -->
+    <nav class="bg-gray-800 border-b border-gray-700 p-4 flex justify-between items-center">
+        <div class="flex items-center space-x-3">
+            <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+            <h1 class="text-xl font-bold tracking-wider">AI Trading <span class="text-blue-500">Agent</span></h1>
+        </div>
+        <div class="flex items-center space-x-4">
+            <div class="bg-gray-900 px-3 py-1 rounded-lg border border-gray-700 flex items-center mr-4">
+                <span class="text-xs text-gray-400 uppercase mr-2 font-bold">Activo:</span>
+                <select id="symbolSelect" class="bg-transparent text-white font-bold outline-none cursor-pointer">
+                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Criptomonedas --</option>
+                    <option class="bg-gray-800" value="BTC/USDT">BTC / USDT</option>
+                    <option class="bg-gray-800" value="ETH/USDT">ETH / USDT</option>
+                    <option class="bg-gray-800" value="SOL/USDT">SOL / USDT</option>
+                    
+                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Mercados Tradicionales --</option>
+                    <option class="bg-gray-800" value="SPY">S&P 500 (SPY)</option>
+                    <option class="bg-gray-800" value="QQQ">Nasdaq 100 (QQQ)</option>
+                    <option class="bg-gray-800" value="GC=F">Oro Físico (GC=F)</option>
+
+                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Acciones Destacadas --</option>
+                    <option class="bg-gray-800" value="AAPL">Apple (AAPL)</option>
+                    <option class="bg-gray-800" value="TSLA">Tesla (TSLA)</option>
+                    <option class="bg-gray-800" value="MSFT">Microsoft (MSFT)</option>
+
+                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- China y Emergentes --</option>
+                    <option class="bg-gray-800" value="MCHI">ETF Mercado Chino (MCHI)</option>
+                    <option class="bg-gray-800" value="KWEB">ETF Internet China (KWEB)</option>
+
+                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Inteligencia Artificial --</option>
+                    <option class="bg-gray-800" value="BOTZ">ETF Robótica y AI (BOTZ)</option>
+                    <option class="bg-gray-800" value="NVDA">NVIDIA Corp. (NVDA)</option>
+                </select>
+            </div>
+            <span class="text-gray-400 text-sm hidden md:inline">Patrimonio (Simulación):</span>
+            <span id="capitalDisplay" class="font-mono text-green-400 hidden md:inline">$100.00</span>
+            <button onclick="window.resetearCuenta()" class="text-xs text-gray-500 hover:text-white mr-4 hidden md:inline" title="Reiniciar Capital a $100">🔄</button>
+            <button id="agentToggle" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold transition">
+                Activar Agente
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6 mt-4">
+        
+        <!-- Columna Izquierda: Gráfico y Métricas -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Gráfico de Trading -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-semibold">BTC/USD <span class="text-sm text-gray-400 font-normal">Temporalidad: 1 Minuto</span></h2>
+                    <span class="text-green-500 font-mono" id="currentPrice">$--.---</span>
+                </div>
+                <div id="chart-container" class="w-full h-[400px]"></div>
+            </div>
+
+            <!-- Posiciones Activas -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <h2 class="text-lg font-semibold text-white mb-4 flex items-center">
+                    <span class="mr-2">💼</span> Posiciones Activas
+                </h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-gray-400">
+                        <thead class="text-xs text-gray-500 uppercase bg-gray-900">
+                            <tr>
+                                <th class="px-4 py-2 rounded-tl">Activo</th>
+                                <th class="px-4 py-2">Cantidad</th>
+                                <th class="px-4 py-2">Precio Entrada</th>
+                                <th class="px-4 py-2">Precio Actual</th>
+                                <th class="px-4 py-2">PnL No Realizado</th>
+                                <th class="px-4 py-2 rounded-tr text-right">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activePositionsBody" class="divide-y divide-gray-700">
+                            <tr id="emptyPositionsRow">
+                                <td colspan="5" class="px-4 py-4 text-center text-gray-600 italic">No tienes posiciones activas (100% liquidez en USDT).</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Historial de Operaciones -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700 mt-6">
+                <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                    <h2 class="text-lg font-semibold text-white flex items-center">
+                        <span class="mr-2">📝</span> Historial de Operaciones y Rendimiento
+                    </h2>
+                    <div class="bg-gray-900 px-3 py-1 rounded border border-gray-600 text-xs">
+                        Rendimiento Neto: <span id="pnlDisplay" class="font-bold text-gray-400">$0.00 (0.00%)</span>
+                    </div>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-gray-400">
+                        <thead class="text-xs text-gray-500 uppercase bg-gray-900">
+                            <tr>
+                                <th class="px-4 py-2 rounded-tl">Hora</th>
+                                <th class="px-4 py-2">Activo</th>
+                                <th class="px-4 py-2">Tipo</th>
+                                <th class="px-4 py-2">Precio</th>
+                                <th class="px-4 py-2">Estado</th>
+                                <th class="px-4 py-2 rounded-tr">Modo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tradeHistoryBody" class="divide-y divide-gray-700">
+                            <tr id="emptyHistoryRow">
+                                <td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones registradas aún.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Inteligencia de Mercado (Recomendaciones Horarias) -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700 mt-6 mb-6">
+                <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                    <h2 class="text-lg font-semibold text-white flex items-center">
+                        <span class="mr-2">🌍</span> Inteligencia de Mercado (Recomendaciones)
+                    </h2>
+                </div>
+                <div class="text-sm text-gray-300">
+                    <p class="mb-3">El rendimiento de la Inteligencia Artificial y los algoritmos Cuantitativos depende 100% del volumen del mercado elegido. Cada activo tiene un reloj interno. Operar fuera de sus horarios fuertes genera señales falsas. Presta atención a estos horarios <strong>(Hora de Argentina)</strong>:</p>
+                    <ul class="list-disc pl-5 space-y-2">
+                        <li><span class="text-blue-400 font-bold">🇺🇸 Wall Street (NASDAQ, S&P 500, Apple, Tesla, NVDA, BOTZ):</span> Lunes a Viernes de <strong>10:30 AM a 17:00 PM ARG</strong>. Es cuando los fondos de inversión inyectan trillones de dólares. Durante la noche y fines de semana la bolsa cierra y el gráfico quedará congelado.</li>
+                        <li><span class="text-red-400 font-bold">🇨🇳 Mercados Chinos (MCHI, KWEB):</span> Su pico de mayor liquidez es durante la madrugada en la Sesión Asiática <strong>(22:30 PM - 04:00 AM ARG)</strong>. Operarlos al mediodía es ineficiente.</li>
+                        <li><span class="text-yellow-400 font-bold">🥇 Oro Físico (GC=F):</span> Activo de refugio global. Opera casi 24hs en la semana, pero los movimientos bruscos y predecibles ocurren cuando despiertan Londres y Nueva York <strong>(04:00 AM - 14:00 PM ARG)</strong>.</li>
+                        <li><span class="text-orange-400 font-bold">🪙 Criptomonedas (BTC, ETH, SOL):</span> Operan 24/7, pero el bot es mucho más certero de Lunes a Viernes. <strong class="text-red-400">Evita los Fines de Semana (Sáb-Dom)</strong>: el volumen bancario desaparece, dejando "Ruido Lateral" que engaña a las matemáticas.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Columna Derecha: Panel de Control del Agente -->
+        <div class="space-y-6">
+
+            <!-- Ajustes de Estrategia -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <h2 class="text-lg font-semibold mb-3 border-b border-gray-700 pb-2">⚙️ Ajustes de Estrategia</h2>
+                <div class="grid grid-cols-1 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Temporalidad (Velas)</label>
+                        <select id="timeframeSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="1m">1 Minuto (Ruido / Miedoso)</option>
+                            <option value="5m">5 Minutos (Equilibrado)</option>
+                            <option value="15m" selected>15 Minutos (Tendencias seguras)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Motor de Análisis</label>
+                        <select id="engineSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="local">Modelo Matemático Local</option>
+                            <option value="ai">Inteligencia Artificial (Gemini)</option>
+                            <option value="ollama">IA Privada y Local (Ollama)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Tamaño de Posición (Riesgo)</label>
+                        <select id="riskSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="0.25">25% del capital (Conservador)</option>
+                            <option value="0.50">50% del capital (Moderado)</option>
+                            <option value="1.00" selected>100% del capital (All-In)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Take Profit / Stop Loss</label>
+                        <select id="tpSlSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="1.5|-1.0">Ganar +1.5% | Perder -1.0% (Rápido)</option>
+                            <option value="3.0|-2.0" selected>Ganar +3.0% | Perder -2.0% (Normal)</option>
+                            <option value="4.0|-2.0">Ganar +4.0% | Perder -2.0% (Swing)</option>
+                        </select>
+                    </div>
+                                        <div>
+                        <label class="block text-xs text-gray-400 mb-1">Horario de Operación</label>
+                        <select id="scheduleModeSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700 mb-2" onchange="document.getElementById('scheduleTimes').classList.toggle('hidden', this.value !== 'custom')">
+                            <option value="libre" selected>24/7 (Libre)</option>
+                            <option value="custom">Rango Horario Específico</option>
+                        </select>
+                        <div id="scheduleTimes" class="hidden flex space-x-2">
+                            <div class="w-1/2">
+                                <label class="block text-[10px] text-gray-500 mb-1">Desde</label>
+                                <input type="time" id="timeStart" value="10:30" class="bg-gray-900 text-white w-full rounded p-1 text-xs border border-gray-700">
+                            </div>
+                            <div class="w-1/2">
+                                <label class="block text-[10px] text-gray-500 mb-1">Hasta</label>
+                                <input type="time" id="timeEnd" value="17:00" class="bg-gray-900 text-white w-full rounded p-1 text-xs border border-gray-700">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-2 border-t border-gray-700 pt-3">
+                        <label class="block text-xs text-gray-400 mb-1">API Key de Google Gemini (Para Motor IA)</label>
+                        <div class="flex space-x-2">
+                            <input type="password" id="apiKeyInput" placeholder="Pega tu API Key de Gemini..." class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700 outline-none focus:border-blue-500">
+                            <button id="saveApiKeyBtn" class="bg-green-600 hover:bg-green-700 px-3 py-1.5 text-sm rounded font-bold transition whitespace-nowrap">Guardar Clave</button>
+                        </div>
+                        <p class="text-[10px] text-gray-500 mt-1 flex justify-between">
+                            <span>Totalmente gratuita, dura toda la sesión.</span>
+                            <span id="apiKeyStatus" class="text-green-400 font-bold hidden">¡Guardada!</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Gestión de Bóveda y Aislamiento -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <h2 class="text-lg font-semibold mb-4 border-b border-gray-700 pb-2 flex items-center">
+                    <span class="mr-2">🏦</span> Bóveda de Seguridad
+                </h2>
+                <div class="space-y-3 text-sm">
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-400">Capital Asignado al Bot:</span>
+                        <span id="botCapitalDisplay" class="font-mono text-white font-bold">$100.00</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-400">Ganancias Aseguradas:</span>
+                        <span id="vaultDisplay" class="font-mono text-green-400 font-bold">$0.00</span>
+                    </div>
+                    <div class="mt-3 pt-3 border-t border-gray-700 flex flex-col space-y-2">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="autoVaultToggle" checked class="sr-only peer">
+                            <div class="w-7 h-4 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-green-500"></div>
+                            <span class="ml-2 text-xs text-gray-400">Auto-Transferir ganancias al duplicar ($200)</span>
+                        </label>
+                        <button onclick="window.inyectarCapital(50)" class="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded border border-gray-600 transition w-full text-center">
+                            💸 Inyectar +$50 al Bot (Interés Compuesto)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Estado del Escuadrón de Agentes -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <h2 class="text-lg font-semibold mb-4 border-b border-gray-700 pb-2">Escuadrón de IA</h2>
+                
+                <div class="space-y-3 mb-4">
+                    <!-- Agente Cuantitativo -->
+                    <div class="flex justify-between items-center bg-gray-700 p-2 rounded">
+                        <div>
+                            <p class="text-sm font-semibold text-blue-400">📊 Agente Cuantitativo</p>
+                            <p class="text-xs text-gray-400">Matemáticas, RSI, SMA</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" checked class="sr-only peer">
+                            <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+                        </label>
+                    </div>
+
+                    <!-- Agente Sentimiento -->
+                    <div class="flex justify-between items-center bg-gray-700 p-2 rounded">
+                        <div>
+                            <p class="text-sm font-semibold text-purple-400">📰 Agente Sentimiento</p>
+                            <p class="text-xs text-gray-400">NLP Leyendo Noticias</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" checked id="sentimentToggle" class="sr-only peer">
+                            <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+                        </label>
+                    </div>
+
+                    <!-- Agente de Riesgo -->
+                    <div class="flex justify-between items-center bg-gray-700 p-2 rounded">
+                        <div>
+                            <p class="text-sm font-semibold text-red-400">🛡️ Agente de Riesgo</p>
+                            <p class="text-xs text-gray-400">Stop Loss, Capital</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-not-allowed opacity-50">
+                            <input type="checkbox" disabled class="sr-only peer">
+                            <div class="w-9 h-5 bg-gray-600 rounded-full"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="mb-4 bg-gray-900 p-3 rounded border border-blue-600/50">
+                    <p class="text-[10px] text-blue-400 uppercase font-bold mb-2">Motor de Decisión (Orquestador)</p>
+                    
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-xs text-gray-400 mb-1 block">Modo de Ejecución:</label>
+                            <select id="executionModeSelect" class="w-full bg-gray-700 text-white text-xs rounded p-1 border border-gray-600 cursor-pointer relative z-20">
+                                <option value="copilot">Modo Copiloto (Preguntar antes de operar)</option>
+                                <option value="auto">Trading Autónomo (Ejecutar directo)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="text-xs text-gray-400 mb-1 block">Contexto Macro (Prompt del Trader):</label>
+                            <textarea id="macroContext" class="w-full bg-gray-700 text-white text-xs rounded p-1 border border-gray-600 focus:outline-none focus:border-blue-500" rows="2" placeholder='Ej: "Guerra detectada. Ignorar sobrecompra, favorecer entradas largas." - Analizado por IA Gemini'></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Radar de Sentimiento -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <div class="flex justify-between items-center mb-3 border-b border-gray-700 pb-2">
+                    <div class="flex items-center space-x-3">
+                        <h2 class="text-md font-semibold text-white">📰 Radar de Sentimiento</h2>
+                        <select id="newsSourceSelect" class="bg-gray-700 text-[10px] text-gray-300 rounded outline-none p-1 cursor-pointer border border-gray-600">
+                            <option value="coindesk">📡 Fuente: CoinDesk (Gratis)</option>
+                            <option value="twitter">🐦 Fuente: Twitter/X (Pro)</option>
+                        </select>
+                    </div>
+                    <span id="sentimentScoreBadge" class="text-xs bg-gray-900 text-gray-400 px-2 py-1 rounded font-bold">ESPERANDO...</span>
+                </div>
+
+                <!-- Termómetro Visual de Sentimiento -->
+                <div class="mb-4">
+                    <div class="flex justify-between text-[10px] text-gray-500 mb-1">
+                        <span>Pánico (-1)</span>
+                        <span>Neutral (0)</span>
+                        <span>Euforia (+1)</span>
+                    </div>
+                    <div class="relative w-full h-3 bg-gray-700 rounded-full overflow-hidden flex">
+                        <div class="h-full bg-gradient-to-r from-red-600 to-red-400" style="width: 33%"></div>
+                        <div class="h-full bg-gradient-to-r from-gray-500 to-gray-400" style="width: 34%"></div>
+                        <div class="h-full bg-gradient-to-r from-green-400 to-green-600" style="width: 33%"></div>
+                        <!-- Aguja Indicadora -->
+                        <div id="sentimentNeedle" class="absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_5px_white] transition-all duration-500" style="left: 50%;"></div>
+                    </div>
+                </div>
+                
+                <div id="sentimentNewsContainer" class="space-y-3">
+                    <p class="text-xs text-gray-500 text-center">Iniciando Agente NLP...</p>
+                </div>
+            </div>
+
+            <!-- Log de Decisiones (Terminal) -->
+            <div class="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700 flex flex-col h-[350px]">
+                <h2 class="text-lg font-semibold mb-4 border-b border-gray-700 pb-2 flex justify-between">
+                    <span>Cerebro IA (Logs)</span>
+                    <button id="clearLogs" class="text-xs text-gray-400 hover:text-white">Limpiar</button>
+                </h2>
+                <div id="terminal" class="flex-1 bg-black p-3 rounded font-mono text-xs text-green-400 overflow-y-auto space-y-2">
+                    <p class="text-gray-500">> Sistema iniciado. Esperando conexión con el orquestador...</p>
+                </div>
+            </div>
+        </div>
+
+
+
+    </div>
+
+    <!-- Modal de Copiloto (Oculto por defecto) -->
+    <div id="copilotModal" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+        <div class="bg-gray-800 border border-blue-500 rounded-lg p-6 max-w-sm w-full shadow-[0_0_20px_rgba(59,130,246,0.5)]">
+            <h2 class="text-xl font-bold text-white mb-2 flex items-center">
+                <span class="text-2xl mr-2">⚠️</span> Autorización Requerida
+            </h2>
+            <p id="copilotMessage" class="text-sm text-gray-300 mb-4">
+                El Agente recomienda COMPRAR BTC/USDT.
+            </p>
+            <div class="bg-gray-900 p-3 rounded mb-6 text-xs text-gray-400 font-mono" id="copilotReason">
+                Razonamiento: ...
+            </div>
+            <div class="flex space-x-3">
+                <button id="btnReject" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded font-bold transition">
+                    Rechazar
+                </button>
+                <button id="btnApprove" class="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded font-bold transition">
+                    Aprobar Operación
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

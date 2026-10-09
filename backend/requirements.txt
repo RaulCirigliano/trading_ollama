@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+ccxt
+pydantic
+pandas
+ta
+
+python-dotenv
+langchain-google-genai
+langchain-core
+feedparser
+vaderSentiment
