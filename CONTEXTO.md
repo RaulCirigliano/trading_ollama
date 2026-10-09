@@ -109,3 +109,4 @@ Mediante reglas matemáticas estrictas (MACD, Bollinger), un Agente de Riesgo in
   - Mercado Local (ARS)
 - **Activos Argentinos:** Se agregaron al menú de selección acciones clave del Merval (YPFD.BA, PAMP.BA, BMA.BA, GGAL.BA, ALUA.BA, TXAR.BA) para operar con la billetera en Pesos.
 - **Reglas Arquitectónicas:** Se creó el archivo `GEMINI.md` para asentar como regla global que, al pasar a dinero real, se usará una "Billetera Broker" centralizada con Just-In-Time funding hacia las billeteras operativas para mitigar riesgos.
+- **Persistencia de Historial (Log en CSV):** Se modificó `backend/main.py` y `app.js` para persistir todo el historial de trades en disco (`historial_trades.csv`). Anteriormente, solo se guardaba en el `localStorage` del navegador, lo cual era volátil. El frontend ahora envía las transacciones a una nueva ruta de la API (`/api/log_trade`).
