@@ -98,3 +98,14 @@ Mediante reglas matemáticas estrictas (MACD, Bollinger), un Agente de Riesgo in
 ## Reglas Avanzadas de Capital para Producción (Dinero Real)
 - [ ] **Aislamiento de Fondos (Billetera Dedicada):** Cuando se conecte a un exchange real, utilizar la funcionalidad de "Sub-cuentas" (ej. en Binance/Kraken) o programar un `MAX_ALLOCATED_CAPITAL` en el código. Esto garantiza que si el usuario tiene $10,000 en el exchange, la IA solo pueda "ver" y utilizar los $1,000 asignados, protegiendo el 90% restante de cualquier fallo algorítmico.
 - [ ] **Interés Compuesto y Aseguramiento de Ganancias (Toma de Beneficios):** Programar lógica para que la IA opere usando un porcentaje dinámico (ej. 25% del saldo actual) permitiendo interés compuesto. Además, crear un "Milestone Checker": si la IA logra duplicar el capital inicial (ej. pasa de $100 a $200), se activa una regla automática que bloquea/transfiere el 50% de las ganancias a la billetera "intocable" del usuario, garantizando que el trader humano recupere su inversión inicial y el bot siga operando puramente con las ganancias ("Free rolling").
+
+## Log de Funcionalidades Implementadas (Sesión Actual - Multi-Billetera y Aislamiento)
+- **Aislamiento de Entorno Local:** Se modificaron los puertos del backend (18767) y frontend (18087) para evitar conflictos con otros proyectos en localhost.
+- **Instalación y Permisos:** Se creó el entorno virtual (`venv`), se instalaron las dependencias correctas (incluyendo `yfinance` faltante) y se crearon accesos directos de escritorio funcionales (`Trading_Ollama.desktop`) con permisos seguros.
+- **Motor de IA Local (Ollama):** Se incrementó el `timeout` de la API interna a 120 segundos para permitir la carga en memoria del modelo `trader-ia` (basado en Llama 3) sin arrojar errores.
+- **Sistema Multi-Billetera (Paper Trading V2):** Se refactorizó la lógica en `app.js` y el Dashboard (`index.html`) para soportar tres bóvedas independientes:
+  - Cripto (USDT)
+  - Wall Street (USD)
+  - Mercado Local (ARS)
+- **Activos Argentinos:** Se agregaron al menú de selección acciones clave del Merval (YPFD.BA, PAMP.BA, BMA.BA, GGAL.BA, ALUA.BA, TXAR.BA) para operar con la billetera en Pesos.
+- **Reglas Arquitectónicas:** Se creó el archivo `GEMINI.md` para asentar como regla global que, al pasar a dinero real, se usará una "Billetera Broker" centralizada con Just-In-Time funding hacia las billeteras operativas para mitigar riesgos.

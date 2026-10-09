@@ -10,3 +10,4 @@ langchain-google-genai
 langchain-core
 feedparser
 vaderSentiment
+yfinance

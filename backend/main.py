@@ -325,7 +325,7 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
                     "stream": False,
                     "format": "json"
                 }
-                res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=15)
+                res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=120)
                 if res.status_code == 200:
                     respuesta = res.json()["response"]
                     ia_decision = json.loads(respuesta)
@@ -361,4 +361,4 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8765, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=18767, reload=True)

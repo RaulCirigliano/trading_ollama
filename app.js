@@ -72,15 +72,29 @@ let currentSymbol = symbolSelect.value;
 let currentPrice = 0;
 
 // Variables de Simulación (Paper Trading) persistentes en el navegador
-let portfolio = JSON.parse(localStorage.getItem('ai_portfolio')) || {
-    USDT: 100.00,
+let portfolio = JSON.parse(localStorage.getItem('ai_portfolio_v2')) || {
+    balances: {
+        USDT: 100.00,
+        USD: 1000.00,
+        ARS: 500000.00
+    },
     ASSET: 0,
     entryPrice: 0,
     VAULT: 0
 };
 
+function getCurrency(symbol) {
+    if (!symbol) return 'USD';
+    if (symbol.includes('USDT')) return 'USDT';
+    if (symbol.includes('.BA')) return 'ARS';
+    return 'USD';
+}
+
 // Mecanismo de Cordura (Sanity Check) para evitar Save Corruption (NaN o variables faltantes)
-if (typeof portfolio.USDT !== 'number' || isNaN(portfolio.USDT)) portfolio.USDT = 100.00;
+if (!portfolio.balances) portfolio.balances = { USDT: 100, USD: 1000, ARS: 500000 };
+if (typeof portfolio.balances.USDT !== 'number' || isNaN(portfolio.balances.USDT)) portfolio.balances.USDT = 100.00;
+if (typeof portfolio.balances.USD !== 'number' || isNaN(portfolio.balances.USD)) portfolio.balances.USD = 1000.00;
+if (typeof portfolio.balances.ARS !== 'number' || isNaN(portfolio.balances.ARS)) portfolio.balances.ARS = 500000.00;
 if (typeof portfolio.ASSET !== 'number' || isNaN(portfolio.ASSET)) portfolio.ASSET = 0;
 if (typeof portfolio.entryPrice !== 'number' || isNaN(portfolio.entryPrice)) portfolio.entryPrice = 0;
 if (typeof portfolio.VAULT !== 'number' || isNaN(portfolio.VAULT)) portfolio.VAULT = 0;
@@ -90,31 +104,41 @@ if (!Array.isArray(tradeHistoryLog)) tradeHistoryLog = [];
 
 // Función de reseteo para limpiar la memoria si el usuario quiere empezar de cero
 window.resetearCuenta = function() {
-    localStorage.removeItem('ai_portfolio');
+    localStorage.removeItem('ai_portfolio_v2');
     // No borramos 'ai_trade_history' para que el registro histórico sea eterno
     location.reload();
 };
 
 function updateCapitalDisplay() {
-    let total = portfolio.USDT + (portfolio.ASSET * currentPrice);
+    let currency = getCurrency(currentSymbol);
+    let total = portfolio.balances[currency] + (portfolio.ASSET * currentPrice);
     
     // Milestone Checker (Toma de Ganancias Automática a la Bóveda)
     const autoVaultToggle = document.getElementById('autoVaultToggle');
     if (autoVaultToggle && autoVaultToggle.checked && total >= 200.00 && portfolio.ASSET === 0) { // Solo transferimos si no hay posiciones abiertas
-        portfolio.USDT -= 100.00;
+        portfolio.balances[currency] -= 100.00;
         portfolio.VAULT += 100.00;
         total -= 100.00;
-        localStorage.setItem('ai_portfolio', JSON.stringify(portfolio));
+        localStorage.setItem('ai_portfolio_v2', JSON.stringify(portfolio));
         logToTerminal(`🏦 HITO ALCANZADO: Capital duplicado. $100 transferidos a la Bóveda Segura Intocable.`, 'action');
     }
 
-    document.getElementById('capitalDisplay').innerText = `$${total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    const currencySymbols = { 'USDT': 'USDT', 'USD': 'USD', 'ARS': 'ARS' };
+    const curSym = currencySymbols[currency] || '$';
+    document.getElementById('capitalDisplay').innerText = `$${total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${curSym}`;
     
-    // Actualizar Bóveda en UI
+    // Actualizar Billeteras en UI
     const vaultDisplay = document.getElementById('vaultDisplay');
     if (vaultDisplay) vaultDisplay.innerText = `$${portfolio.VAULT.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-    const botCapDisplay = document.getElementById('botCapitalDisplay');
-    if (botCapDisplay) botCapDisplay.innerText = `$${total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    
+    const usdtDisp = document.getElementById('walletUsdtDisplay');
+    if (usdtDisp) usdtDisp.innerText = `$${portfolio.balances.USDT.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    
+    const usdDisp = document.getElementById('walletUsdDisplay');
+    if (usdDisp) usdDisp.innerText = `$${portfolio.balances.USD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    
+    const arsDisp = document.getElementById('walletArsDisplay');
+    if (arsDisp) arsDisp.innerText = `$${portfolio.balances.ARS.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     
     // Calcular Rendimiento Total (PnlD) basado solo en el capital activo del bot
     const pnlDisplay = document.getElementById('pnlDisplay');
@@ -183,7 +207,7 @@ symbolSelect.addEventListener('change', () => {
 async function fetchMarketData() {
     try {
         logToTerminal(`Conectando al motor Python para obtener velas de ${currentSymbol}...`, 'info');
-        const response = await fetch(`http://localhost:8766/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
+        const response = await fetch(`http://localhost:18767/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
         const data = await response.json();
@@ -270,7 +294,7 @@ agentToggle.addEventListener('click', () => {
                 const [tpStr, slStr] = tpSlVal.split('|');
                 const riskVal = document.getElementById('riskSelect')?.value || "0.25";
                 
-                const url = `http://localhost:8766/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}`;
+                const url = `http://localhost:18767/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}`;
                 const response = await fetch(url);
                 const data = await response.json();
                 
@@ -286,7 +310,7 @@ agentToggle.addEventListener('click', () => {
                     const baseCoin = currentSymbol.split('/')[0];
                     const executionMode = document.getElementById('executionModeSelect')?.value || 'copilot';
                     
-                    const isBuyable = data.signal === 'COMPRAR' && portfolio.USDT > 10;
+                    const isBuyable = data.signal === 'COMPRAR' && portfolio.balances[getCurrency(currentSymbol)] > 10;
                     const isSellable = data.signal === 'VENDER' && portfolio.ASSET > 0.0001;
                     
                     if (isBuyable || isSellable) {
@@ -335,7 +359,7 @@ agentToggle.addEventListener('click', () => {
 // Ciclo de Gráfico en Vivo (Cada 2 segundos) para que se mueva rápido
 setInterval(async () => {
     try {
-        const response = await fetch(`http://localhost:8766/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
+        const response = await fetch(`http://localhost:18767/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
         const data = await response.json();
         if (data && data.length > 0) {
             const latest_candle = data[data.length - 1];
@@ -383,7 +407,7 @@ setInterval(async () => {
 async function updateSentiment() {
     try {
         const source = document.getElementById('newsSourceSelect')?.value || 'coindesk';
-        const response = await fetch(`http://localhost:8766/api/market/sentiment?symbol=${currentSymbol}&source=${source}`);
+        const response = await fetch(`http://localhost:18767/api/market/sentiment?symbol=${currentSymbol}&source=${source}`);
         const data = await response.json();
         if (data && !data.error) {
             const badge = document.getElementById('sentimentScoreBadge');
@@ -488,7 +512,8 @@ function executeTrade(signal, baseCoin, price, mode = 'Automático') {
     if (signal === 'COMPRAR') {
         // Gestión de Capital Dinámica
         const riskFactor = parseFloat(document.getElementById('riskSelect')?.value || "0.25");
-        const maxRiesgo = portfolio.USDT * riskFactor;
+        const currency = getCurrency(currentSymbol);
+        const maxRiesgo = portfolio.balances[currency] * riskFactor;
         const tradeAmount = maxRiesgo;
         
         if (tradeAmount < 5) {
@@ -503,20 +528,21 @@ function executeTrade(signal, baseCoin, price, mode = 'Automático') {
         const valorNuevo = cantidadAComprar * price;
         
         portfolio.ASSET += cantidadAComprar;
-        portfolio.USDT -= tradeAmount;
+        portfolio.balances[currency] -= tradeAmount;
         portfolio.entryPrice = (valorPrevio + valorNuevo) / portfolio.ASSET;
         
         logToTerminal(`💰 SIMULACIÓN: COMPRADO ${cantidadAComprar.toFixed(4)} ${baseCoin} a $${price.toLocaleString()} (Inversión: $${tradeAmount.toFixed(2)})`, 'action');
     } else if (signal === 'VENDER') {
         const dolaresObtenidos = portfolio.ASSET * price;
-        portfolio.USDT += dolaresObtenidos;
+        const currency = getCurrency(currentSymbol);
+        portfolio.balances[currency] += dolaresObtenidos;
         portfolio.ASSET = 0;
         portfolio.entryPrice = 0;
-        logToTerminal(`💵 SIMULACIÓN: VENDIDO ${baseCoin} a $${price.toLocaleString()}. Nuevo Saldo USDT: $${portfolio.USDT.toFixed(2)}`, 'error');
+        logToTerminal(`💵 SIMULACIÓN: VENDIDO ${baseCoin} a $${price.toLocaleString()}. Nuevo Saldo ${currency}: $${portfolio.balances[currency].toFixed(2)}`, 'error');
     }
     
     // Guardar en el navegador (Persistencia)
-    localStorage.setItem('ai_portfolio', JSON.stringify(portfolio));
+    localStorage.setItem('ai_portfolio_v2', JSON.stringify(portfolio));
     
     updateCapitalDisplay();
     addTradeToHistory(signal, baseCoin, price, 'Ejecutada', mode);
@@ -576,8 +602,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Funciones interactivas de la Bóveda
 window.inyectarCapital = function(amount) {
-    portfolio.USDT += amount;
-    localStorage.setItem('ai_portfolio', JSON.stringify(portfolio));
+    portfolio.balances[getCurrency(currentSymbol)] += amount;
+    localStorage.setItem('ai_portfolio_v2', JSON.stringify(portfolio));
     logToTerminal(`💸 DEPÓSITO: Se han inyectado $${amount} de liquidez al Agente.`, 'action');
     updateCapitalDisplay();
 };
@@ -588,7 +614,7 @@ document.getElementById('saveApiKeyBtn')?.addEventListener('click', async () => 
     const key = document.getElementById('apiKeyInput').value;
     if(!key) return;
     try {
-        const response = await fetch('http://localhost:8766/api/config/gemini', {
+        const response = await fetch('http://localhost:18767/api/config/gemini', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({api_key: key})
