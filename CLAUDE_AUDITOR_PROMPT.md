@@ -1,11 +1,11 @@
-# 🕵️‍♂️ Prompt de Auditoría para Claude Opus (Revisión de Seguridad y Lógica)
+# 🕵️‍♂️ Prompt de Auditoría para Claude 3.5 Sonnet (Revisión de Seguridad y Lógica)
 
-**INSTRUCCIÓN PARA EL USUARIO:** Copia todo el contenido de este archivo (o súbelo directamente) al chat de **Claude Opus**. Él se encargará de auditar el código como un Ingeniero de Seguridad Financiera.
+**INSTRUCCIÓN PARA EL USUARIO:** Copia todo el contenido de este archivo (o súbelo directamente) al chat de **Claude 3.5 Sonnet**. Él se encargará de auditar el código como un Ingeniero de Seguridad Financiera.
 
 ---
 ---
 
-## 🤖 CONTEXTO PARA CLAUDE OPUS
+## 🤖 CONTEXTO PARA CLAUDE 3.5 SONNET
 Actúa como un **Ingeniero de Software Senior Especialista en HFT (High-Frequency Trading) y Ciberseguridad**. 
 
 He construido una plataforma de simulación de trading algorítmico (Paper Trading V2) donde un agente de Inteligencia Artificial (Ollama / Gemini) analiza el mercado y ejecuta órdenes de compra/venta usando estrategias de análisis técnico (MACD, Bollinger, VWAP, RSI).
@@ -1067,3 +1067,5 @@ document.getElementById('engineSelect')?.addEventListener('change', () => {
 ---
 **INSTRUCCIÓN FINAL PARA CLAUDE:**
 Basándote en el código anterior, comienza tu auditoría. Sé brutalmente honesto. ¿Dónde se romperá el sistema si la IA envía señales basura? ¿Dónde fallará la matemática del Paper Trading si compro 2 activos distintos de la misma moneda al mismo tiempo? Presenta tu diagnóstico y tus correcciones en código.
+
+5. **ENTREGABLE FINAL (PROMPT DE IMPLEMENTACIÓN):** Al final de tu respuesta, debes generar un bloque de texto (encerrado en un bloque de código) que contenga un PROMPT que yo pueda copiar y pegarle a mi otro asistente de IA (Gemini/Antigravity) que está manejando mi código local. Este prompt debe decirle al otro asistente EXACTAMENTE qué archivos modificar, qué líneas borrar y qué código nuevo insertar para aplicar tus soluciones. De esta manera, gasto mis tokens contigo solo para la arquitectura, y mi asistente local hace el trabajo manual.
