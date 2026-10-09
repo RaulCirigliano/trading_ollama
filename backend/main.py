@@ -359,6 +359,30 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
     except Exception as e:
         return {"error": str(e)}
 
+class TradeLogRequest(BaseModel):
+    timeString: str
+    symbol: str
+    signal: str
+    price: float
+    status: str
+    mode: str
+
+@app.post("/api/log_trade")
+def log_trade(trade: TradeLogRequest):
+    import csv
+    try:
+        # Save in the root of the project, one level up from backend/
+        file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "historial_trades.csv")
+        file_exists = os.path.isfile(file_path)
+        with open(file_path, mode='a', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            if not file_exists:
+                writer.writerow(["Time", "Symbol", "Signal", "Price", "Status", "Mode"])
+            writer.writerow([trade.timeString, trade.symbol, trade.signal, trade.price, trade.status, trade.mode])
+        return {"status": "success", "message": "Trade logged successfully"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=18767, reload=True)

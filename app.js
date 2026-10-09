@@ -502,8 +502,15 @@ function addTradeToHistory(signal, baseCoin, price, status, mode) {
     const timeString = new Date().toLocaleTimeString();
     tradeHistoryLog.unshift({ timeString, signal, baseCoin, price, status, mode });
     
-    // Guardar en persistencia
+    // Guardar en persistencia local (navegador)
     localStorage.setItem('ai_trade_history', JSON.stringify(tradeHistoryLog));
+    
+    // Guardar en archivo persistente (backend CSV)
+    fetch('http://localhost:18767/api/log_trade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeString, symbol: baseCoin, signal, price, status, mode })
+    }).catch(err => console.error('Error guardando en archivo CSV:', err));
     
     renderTradeHistory();
 }
