@@ -319,8 +319,8 @@
                         <label class="block text-xs text-gray-400 mb-1">Tamaño de Posición (Riesgo)</label>
                         <select id="riskSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
                             <option value="0.25">25% del capital (Conservador)</option>
-                            <option value="0.50">50% del capital (Moderado)</option>
-                            <option value="1.00" selected>100% del capital (All-In)</option>
+                            <option value="0.50" selected>50% del capital (Moderado)</option>
+                            <option value="1.00">100% del capital (All-In)</option>
                         </select>
                     </div>
                     <div>
@@ -368,6 +368,26 @@
                     <div>
                         <label class="text-xs text-gray-400 mb-1 block">Contexto Macro (Prompt del Trader):</label>
                         <textarea id="macroContext" class="w-full bg-gray-900 text-white text-xs rounded p-2 border border-gray-700 focus:outline-none focus:border-blue-500 shadow-inner" rows="2" placeholder='Ej: "Guerra detectada. Ignorar sobrecompra, favorecer entradas largas."'></textarea>
+                    </div>
+
+                    <!-- Radar Macro (Agente de Inversiones) -->
+                    <div class="bg-gray-900 p-3 rounded border border-yellow-500/50 shadow-inner mt-2">
+                        <div class="mb-2 border-b border-gray-700 pb-2 flex justify-between items-center">
+                            <h2 class="text-sm font-semibold text-yellow-500">🔭 Radar de Oportunidades (IA)</h2>
+                            <span id="radarLiveStatus" class="text-[10px] bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded border border-gray-500/50 transition-colors">OFF</span>
+                        </div>
+                        
+                        <!-- Contenedor de Tarjetas de Oportunidad -->
+                        <div id="macroOpportunitiesContainer" class="space-y-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                            <!-- Ejemplo de Tarjeta (Placeholder) -->
+                            <div class="bg-gray-800 p-2 rounded border border-gray-600">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span class="text-xs font-bold text-white">GOLD (Oro)</span>
+                                    <span class="text-[10px] text-green-400 font-bold bg-green-400/10 px-1 rounded">85% Confianza</span>
+                                </div>
+                                <p class="text-[10px] text-gray-400">Oportunidad: Tensiones geopolíticas indican alza. Apertura recomendada Lunes 09:30.</p>
+                            </div>
+                        </div>
                     </div>
                     <div class="mt-2 border-t border-gray-700 pt-3">
                         <label class="block text-xs text-gray-400 mb-1">API Key de Google Gemini (Para Motor IA)</label>
@@ -485,6 +505,18 @@
                         </label>
                     </div>
 
+                    <!-- Agente de Inversiones (Macro & Radar) -->
+                    <div class="flex justify-between items-start bg-gray-700 p-2 rounded border-l-2 border-yellow-500">
+                        <div class="pr-2">
+                            <p class="text-sm font-semibold text-yellow-500">🔭 Agente de Inversiones</p>
+                            <p class="text-[10px] text-gray-300 mt-1 leading-tight">Investiga noticias, calendarios económicos y eventos globales. Advierte sobre riesgos y genera Tarjetas de Oportunidad con % de confianza. Asesora al Cerebro, no ejecuta.</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer mt-1">
+                            <input type="checkbox" id="investmentToggle" class="sr-only peer">
+                            <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
+                        </label>
+                    </div>
+
                     <!-- Agente de Riesgo -->
                     <div class="flex justify-between items-start bg-gray-700 p-2 rounded">
                         <div class="pr-2">
@@ -533,7 +565,6 @@
                         <p class="text-xs text-gray-500 text-center">Iniciando Agente NLP...</p>
                     </div>
                 </div>
-
             </div>
 
         </div>
@@ -619,6 +650,6 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=5"></script>
+    <script src="js/app.js?v=6"></script>
 </body>
 </html>

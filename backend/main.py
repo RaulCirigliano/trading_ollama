@@ -108,6 +108,98 @@ def get_history(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int = 10
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/api/macro/radar")
+def get_macro_radar(engine: str = "ollama"):
+    """
+    Agente de Inversiones (Macro Radar).
+    Busca noticias globales y detecta oportunidades/riesgos de mercado.
+    """
+    try:
+        import requests
+        import feedparser
+        import json
+        
+        # 1. Extraer titulares generales (Google News Economía/Mercados)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        rss_url = 'https://news.google.com/rss/search?q=economy+global+markets+finance&hl=en-US&gl=US&ceid=US:en'
+        r = requests.get(rss_url, headers=headers, timeout=10)
+        feed = feedparser.parse(r.content)
+        
+        titulares = []
+        limit = 5 if engine == "deepseek" else 10
+        for entry in feed.entries[:limit]: # Reducido para no saturar a DeepSeek
+            titulares.append(entry.title)
+            
+        news_text = "\n".join(titulares)
+        
+        prompt = f'''
+        Eres un Analista Macro y Agente de Inversiones Institucional.
+        Mantén tu razonamiento interno muy breve.
+        Lee los siguientes titulares recientes:
+        {news_text}
+        
+        Identifica hasta 3 activos específicos (ej. SPY, GOLD, BTC, TSLA, OIL) que presenten una Oportunidad o Riesgo inminente según las noticias.
+        Responde EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura de lista de objetos:
+        [
+          {{
+            "asset": "Símbolo",
+            "type": "Oportunidad" o "Peligro",
+            "confidence": porcentaje_como_entero (ej: 85),
+            "reason": "Resumen muy breve",
+            "schedule": "Horario sugerido o Inmediato"
+          }}
+        ]
+        No incluyas markdown, responde directamente con el array [].
+        '''
+        
+        if engine == "ai" or engine == "gemini":
+            from dotenv import load_dotenv
+            import os
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            
+            load_dotenv()
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key or api_key == "tu_clave_aqui_sin_comillas":
+                return [{"asset": "GEMINI_OFF", "type": "Peligro", "confidence": 0, "reason": "Falta API Key", "schedule": "-"}]
+                
+            llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.3)
+            response = llm.invoke(prompt)
+            txt = response.content.replace("```json", "").replace("```", "").strip()
+            return json.loads(txt)
+            
+        else: # ollama, deepseek, local (por defecto usa ollama)
+            # FIX: Nunca usar DeepSeek para el radar de noticias porque bloquea la cola de Ollama durante 10 minutos
+            # forzamos el uso de trader-ia (o Llama) para que sea rápido y no cuelgue al Cerebro principal.
+            model_name = "trader-ia"
+            payload = {
+                "model": model_name,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json"
+            }
+                
+            res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=120)
+            if res.status_code == 200:
+                resp_json = res.json().get("response", "[]")
+                try:
+                    parsed = json.loads(resp_json)
+                    
+                    # Llama3 a veces responde con {"signals": [...]} en lugar de [...]
+                    if isinstance(parsed, dict):
+                        for k, v in parsed.items():
+                            if isinstance(v, list):
+                                return v
+                        return [parsed] # Si no encontró una lista, envuelve el objeto en una lista
+                        
+                    return parsed
+                except:
+                    return [{"asset": "JSON_ERR", "type": "Peligro", "confidence": 0, "reason": "Error en formato de respuesta de Ollama", "schedule": "-"}]
+            else:
+                return [{"asset": "ERROR", "type": "Peligro", "confidence": 0, "reason": "Ollama inactivo", "schedule": "-"}]
+            
+    except Exception as e:
+        return [{"asset": "SYS_ERR", "type": "Peligro", "confidence": 0, "reason": str(e), "schedule": "-"}]
+
 @app.get("/api/market/sentiment")
 def get_sentiment(symbol: str = "BTC/USDT", source: str = "coindesk"):
     """
@@ -134,18 +226,39 @@ def get_sentiment(symbol: str = "BTC/USDT", source: str = "coindesk"):
                 ]
             }
         
-        # Si es CoinDesk
-        feed = feedparser.parse('https://www.coindesk.com/arc/outboundfeeds/rss/')
+        # Lógica 'Auto': Decidir la fuente por el activo
+        is_crypto = base_asset in ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA"] or "USDT" in symbol
+        
+        if source == "auto" or source == "coindesk" and not is_crypto:
+            # Si eligió auto, o eligió coindesk pero está viendo una acción, forzamos auto inteligente
+            source = "coindesk" if is_crypto else "yahoo"
+
+        import requests
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+        # Cargar RSS según la fuente
+        if source == "yahoo":
+            # Limpiar sufijos raros para buscar mejor en Google News
+            query_term = base_asset.replace(".BA", "").replace("GC=F", "Gold")
+            rss_url = f'https://news.google.com/rss/search?q={query_term}+stock&hl=en-US&gl=US&ceid=US:en'
+            r = requests.get(rss_url, headers=headers, timeout=10)
+            feed = feedparser.parse(r.content)
+        else:
+            r = requests.get('https://www.coindesk.com/arc/outboundfeeds/rss/', headers=headers, timeout=10)
+            feed = feedparser.parse(r.content)
+            
         analyzer = SentimentIntensityAnalyzer()
         
         total_score = 0
         news_list = []
         
-        # Filtrar noticias que hablen de nuestro activo
         for entry in feed.entries:
             title = entry.title
-            # Buscar menciones (ignorar mayúsculas)
-            if base_asset.lower() in title.lower() or nombre_completo.lower() in title.lower():
+            
+            # Yahoo Finance ya filtra las noticias por Ticker, CoinDesk es global y requiere filtro manual
+            is_relevant = (source == "yahoo") or (base_asset.lower() in title.lower() or nombre_completo.lower() in title.lower())
+            
+            if is_relevant:
                 score = analyzer.polarity_scores(title)
                 compound = score['compound']
                 total_score += compound
@@ -155,12 +268,12 @@ def get_sentiment(symbol: str = "BTC/USDT", source: str = "coindesk"):
                     "score": round(compound, 2)
                 })
                 
-                if len(news_list) >= 5: # Quedarnos con máximo 5 noticias relevantes
+                if len(news_list) >= 5: # Máximo 5 noticias
                     break
                     
         # Si no hay noticias recientes sobre esta moneda, ser neutrales
         if len(news_list) == 0:
-            return {"score": 0, "estado": "NEUTRAL", "noticias": [{"title": f"Sin noticias recientes de {nombre_completo}", "score": 0}]}
+            return {"score": 0, "estado": "NEUTRAL", "fuente": "Google News" if source == "yahoo" else "CoinDesk", "noticias": [{"title": f"Sin noticias recientes de {nombre_completo}", "score": 0}]}
             
         avg_score = total_score / len(news_list)
         
@@ -174,6 +287,7 @@ def get_sentiment(symbol: str = "BTC/USDT", source: str = "coindesk"):
         return {
             "score": round(avg_score, 2),
             "estado": estado,
+            "fuente": "Google News" if source == "yahoo" else "CoinDesk",
             "noticias": news_list
         }
     except Exception as e:
@@ -316,6 +430,56 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
                     signal = "ERROR"
                     reason = f"Error en el Agente Gemini: {str(e)}"
                     
+        elif engine == "deepseek":
+            import requests
+            import json
+            import re
+            
+            prompt_text = f'''
+            Eres un Senior Quantitative Trader Institucional operando algorítmicamente.
+            Mercado: {symbol}. Velas de {timeframe}. Riesgo: {int(risk * 100)}%. TP: +{tp}%. SL: -{sl}%.
+            
+            DATOS TÉCNICOS Y CONTEXTO ACTUAL:
+            - Precio: ${price_val}
+            - VWAP: ${round(vwap_val, 2) if not pd.isna(vwap_val) else "N/A"}
+            - RSI (14): {rsi_val}
+            - MACD: {round(latest['macd_diff'], 2) if not pd.isna(latest['macd_diff']) else "N/A"}
+            - Bandas Bollinger: Inf=${round(bb_low, 2) if not pd.isna(bb_low) else "N/A"}, Sup=${round(bb_high, 2) if not pd.isna(bb_high) else "N/A"}
+            - Sentimiento de Noticias: {sentiment} (-1 a 1)
+            - Directiva Macro (Humano): {macro if macro else "Ninguna"}
+            
+            ANALIZA ESTOS DATOS PASO A PASO. (MANTÉN TU RAZONAMIENTO INTERNO MUY BREVE, MÁXIMO 2 PÁRRAFOS).
+            Al final de tu respuesta, debes dar tu veredicto final usando OBLIGATORIAMENTE una de estas tres palabras entre corchetes:
+            [COMPRAR] o [VENDER] o [MANTENER]
+            '''
+            
+            try:
+                payload = {
+                    "model": "trader-deepseek",
+                    "prompt": prompt_text,
+                    "stream": False
+                }
+                res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=600)
+                if res.status_code == 200:
+                    respuesta = res.json()["response"]
+                    
+                    # Extraer señal final con Regex
+                    match = re.search(r'\[(COMPRAR|VENDER|MANTENER)\]', respuesta, re.IGNORECASE)
+                    signal = match.group(1).upper() if match else "MANTENER"
+                    
+                    # Limpiar el bloque <think> del texto para no inundar la terminal
+                    clean_reason = re.sub(r'<think>.*?</think>', '', respuesta, flags=re.DOTALL | re.IGNORECASE).strip()
+                    if not clean_reason:
+                        clean_reason = respuesta
+                    
+                    reason = clean_reason[:300] + "..." if len(clean_reason) > 300 else clean_reason
+                else:
+                    signal = "ERROR"
+                    reason = "Error del servidor Ollama (DeepSeek)."
+            except Exception as e:
+                signal = "ERROR"
+                reason = "DeepSeek no responde. Verifica que el modelo 'trader-deepseek' esté instalado."
+                    
         elif engine == "ollama":
             import requests
             import json
@@ -345,7 +509,7 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
                     "stream": False,
                     "format": "json"
                 }
-                res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=120)
+                res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=600)
                 if res.status_code == 200:
                     respuesta = res.json()["response"]
                     ia_decision = json.loads(respuesta)

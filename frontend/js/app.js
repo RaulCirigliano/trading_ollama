@@ -599,6 +599,74 @@ if (newsSourceSelect) {
     });
 }
 
+// --- Agente de Inversiones (Radar Macro) ---
+async function updateMacroRadar() {
+    const toggle = document.getElementById('investmentToggle');
+    const container = document.getElementById('macroOpportunitiesContainer');
+    if (!toggle || !container) return;
+
+    if (!toggle.checked) {
+        container.innerHTML = '<p class="text-xs text-gray-500 text-center py-2">Agente Desactivado.</p>';
+        return;
+    }
+
+    const engine = document.getElementById('engineSelect')?.value || 'ollama';
+    container.innerHTML = '<p class="text-xs text-yellow-500 text-center py-2 animate-pulse">Escaneando eventos globales...</p>';
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/macro/radar?engine=${engine}`);
+        const data = await response.json();
+        
+        container.innerHTML = '';
+        if (Array.isArray(data) && data.length > 0) {
+            data.forEach(item => {
+                const isOp = item.type === 'Oportunidad';
+                const colorClass = isOp ? 'text-green-400 bg-green-400/10' : 'text-red-400 bg-red-400/10';
+                const typeColor = isOp ? 'text-green-400' : 'text-red-400';
+                const div = document.createElement('div');
+                div.className = 'bg-gray-800 p-2 rounded border border-gray-600 mb-2';
+                div.innerHTML = `
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs font-bold text-white">${item.asset || 'N/A'}</span>
+                        <span class="text-[10px] ${colorClass} font-bold px-1 rounded">${item.confidence || 0}% Conf.</span>
+                    </div>
+                    <p class="text-[10px] text-gray-400 leading-tight"><span class="font-bold ${typeColor}">${item.type}:</span> ${item.reason}</p>
+                    <p class="text-[9px] text-gray-500 mt-1">⏳ Sugerido: ${item.schedule || '-'}</p>
+                `;
+                container.appendChild(div);
+            });
+        } else {
+            container.innerHTML = '<p class="text-xs text-gray-500 text-center py-2">Sin hallazgos macro.</p>';
+        }
+    } catch (err) {
+        console.error("Fallo el Agente de Inversiones", err);
+        container.innerHTML = '<p class="text-xs text-red-500 text-center py-2">Error de conexión.</p>';
+    }
+}
+updateMacroRadar();
+setInterval(updateMacroRadar, 120000); // 2 minutos
+
+const investmentToggle = document.getElementById('investmentToggle');
+if (investmentToggle) {
+    investmentToggle.addEventListener('change', () => {
+        const isChecked = investmentToggle.checked;
+        logToTerminal(isChecked ? "Agente de Inversiones ACTIVADO" : "Agente de Inversiones DESACTIVADO", "info");
+        
+        const badge = document.getElementById('radarLiveStatus');
+        if (badge) {
+            if (isChecked) {
+                badge.innerText = "EN VIVO";
+                badge.className = "text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/50 transition-colors";
+            } else {
+                badge.innerText = "OFF";
+                badge.className = "text-[10px] bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded border border-gray-500/50 transition-colors";
+            }
+        }
+        
+        updateMacroRadar();
+    });
+}
+
 document.getElementById('clearLogs').addEventListener('click', () => {
     terminal.innerHTML = '';
 });
