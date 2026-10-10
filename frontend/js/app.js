@@ -315,7 +315,9 @@ agentToggle.addEventListener('click', () => {
                 const [tpStr, slStr] = tpSlVal.split('|');
                 const riskVal = document.getElementById('riskSelect')?.value || "0.25";
                 
-                const url = `${API_BASE_URL}/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}`;
+                const macroContextText = document.getElementById('macroContext')?.value || '';
+                const sentScore = window.currentSentimentScore || 0;
+                const url = `${API_BASE_URL}/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}`;
                 const response = await fetch(url);
                 const data = await response.json();
                 
@@ -437,6 +439,7 @@ async function updateSentiment() {
         const response = await fetch(`${API_BASE_URL}/api/market/sentiment?symbol=${currentSymbol}&source=${source}`);
         const data = await response.json();
         if (data && !data.error) {
+            window.currentSentimentScore = data.score;
             const badge = document.getElementById('sentimentScoreBadge');
             const container = document.getElementById('sentimentNewsContainer');
             

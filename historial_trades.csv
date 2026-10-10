@@ -43,3 +43,8 @@ Time,Symbol,Signal,Price,Status,Mode
 21:39:31,BTC/USDT,VENDER,82566.01,Ejecutada,Automático
 23:26:05,BTC,COMPRAR,82675.02,Ejecutada,Copiloto
 23:32:10,BTC,VENDER,82632.0,Ejecutada,Copiloto
+0:35:09,BTC,COMPRAR,82589.16,Ejecutada,Automático
+0:36:20,BTC,COMPRAR,82572.69,Ejecutada,Automático
+0:37:29,BTC,VENDER,82560.0,Ejecutada,Automático
+0:38:37,BTC,COMPRAR,82560.0,Ejecutada,Automático
+0:46:28,BTC,COMPRAR,82582.01,Ejecutada,Copiloto

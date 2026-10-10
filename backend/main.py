@@ -180,7 +180,7 @@ def get_sentiment(symbol: str = "BTC/USDT", source: str = "coindesk"):
         return {"error": str(e)}
 
 @app.get("/api/market/analysis")
-def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = "local", tp: float = 3.0, sl: float = 2.0, risk: float = 1.0):
+def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = "local", tp: float = 3.0, sl: float = 2.0, risk: float = 1.0, sentiment: float = 0.0, macro: str = ""):
     """
     Realiza análisis técnico cuantitativo de las últimas velas.
     """
@@ -281,11 +281,13 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
                         "- VWAP (Institucional): ${vwap}\n"
                         "- RSI (14): {rsi}\n"
                         "- Histograma MACD: {macd}\n"
-                        "- Bandas Bollinger: Inf=${bb_low}, Sup=${bb_high}\n\n"
-                        "INSTRUCCIÓN CORE: Tu decisión principal debe girar en torno al VWAP. Si el Precio > VWAP, hay soporte institucional (alcista). Si Precio < VWAP, hay resistencia institucional (bajista). "
-                        "Cruza esta información con el RSI (sobrecomprado/sobrevendido) y las Bandas. "
+                        "- Bandas Bollinger: Inf=${bb_low}, Sup=${bb_high}\n"
+                        "- Sentimiento del Mercado (Noticias): {sentiment} (-1 pánico a 1 euforia)\n"
+                        "- Contexto Macro (Directiva del Humano): {macro}\n\n"
+                        "INSTRUCCIÓN CORE: Tu decisión debe basarse en el VWAP y el Contexto Macro. Si hay directiva humana, dale prioridad. Si Precio > VWAP es alcista, < VWAP es bajista. "
+                        "Cruza esto con el RSI, las Bandas y el Sentimiento. "
                         "Tu respuesta debe ser EXCLUSIVAMENTE en formato JSON válido estricto sin markdown:\n"
-                        '{"signal": "COMPRAR", "reason": "Justificación de 15 palabras centrada en VWAP"}'
+                        '{"signal": "COMPRAR", "reason": "Justificación de 15 palabras."}'
                     )
                     
                     chain = prompt | llm
@@ -300,7 +302,9 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
                         "rsi": rsi_val,
                         "macd": round(latest['macd_diff'], 2) if not pd.isna(latest['macd_diff']) else "N/A",
                         "bb_low": round(bb_low, 2) if not pd.isna(bb_low) else "N/A",
-                        "bb_high": round(bb_high, 2) if not pd.isna(bb_high) else "N/A"
+                        "bb_high": round(bb_high, 2) if not pd.isna(bb_high) else "N/A",
+                        "sentiment": sentiment,
+                        "macro": macro if macro else "Sin contexto macroeconómico adicional."
                     })
                     
                     raw_json = respuesta.content.replace("`json", "").replace("`", "").strip()
@@ -320,15 +324,17 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
             Eres un Senior Quantitative Trader Institucional operando algorítmicamente.
             Mercado: {symbol}. Velas de {timeframe}. Riesgo: {int(risk * 100)}%. TP: +{tp}%. SL: -{sl}%.
             
-            DATOS TÉCNICOS ACTUALES:
+            DATOS TÉCNICOS Y CONTEXTO ACTUAL:
             - Precio: ${price_val}
             - VWAP: ${round(vwap_val, 2) if not pd.isna(vwap_val) else "N/A"}
             - RSI (14): {rsi_val}
             - MACD: {round(latest['macd_diff'], 2) if not pd.isna(latest['macd_diff']) else "N/A"}
             - Bandas Bollinger: Inf=${round(bb_low, 2) if not pd.isna(bb_low) else "N/A"}, Sup=${round(bb_high, 2) if not pd.isna(bb_high) else "N/A"}
+            - Sentimiento de Noticias: {sentiment} (-1 a 1)
+            - Directiva Macro (Humano): {macro if macro else "Ninguna"}
             
             Responde EXCLUSIVAMENTE con este formato JSON y NADA MAS:
-            {{"signal": "COMPRAR", "reason": "Justificacion de 15 palabras centrada en VWAP"}}
+            {{"signal": "COMPRAR", "reason": "Justificacion breve combinando datos y contexto."}}
             (Opciones de signal: COMPRAR, VENDER, MANTENER).
             '''
             
