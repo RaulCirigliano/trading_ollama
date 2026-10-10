@@ -79,6 +79,10 @@ def get_history(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int = 10
         df['sma_20'] = ta.trend.SMAIndicator(close=df['close'], window=20).sma_indicator()
         df['vwap'] = ta.volume.VolumeWeightedAveragePrice(high=df['high'], low=df['low'], close=df['close'], volume=df['volume'], window=14).volume_weighted_average_price()
         
+        vwap_std = df['close'].rolling(window=14).std()
+        df['vwap_upper'] = df['vwap'] + vwap_std
+        df['vwap_lower'] = df['vwap'] - vwap_std
+        
         # Lo formateamos para que Lightweight Charts lo entienda fácilmente
         formatted_data = []
         for index, row in df.iterrows():
@@ -94,6 +98,10 @@ def get_history(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int = 10
                 item["sma_20"] = round(row['sma_20'], 2)
             if not pd.isna(row['vwap']):
                 item["vwap"] = round(row['vwap'], 2)
+            if not pd.isna(row['vwap_upper']):
+                item["vwap_upper"] = round(row['vwap_upper'], 2)
+            if not pd.isna(row['vwap_lower']):
+                item["vwap_lower"] = round(row['vwap_lower'], 2)
             formatted_data.append(item)
             
         return formatted_data
@@ -189,6 +197,12 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
         # Calcular Medias Móviles (SMA 20 y SMA 50)
         df['sma_20'] = ta.trend.SMAIndicator(close=df['close'], window=20).sma_indicator()
         df['vwap'] = ta.volume.VolumeWeightedAveragePrice(high=df['high'], low=df['low'], close=df['close'], volume=df['volume'], window=14).volume_weighted_average_price()
+        
+        # Calcular desviación estándar para las bandas del VWAP (aproximación con stdev del precio)
+        vwap_std = df['close'].rolling(window=14).std()
+        df['vwap_upper'] = df['vwap'] + vwap_std
+        df['vwap_lower'] = df['vwap'] - vwap_std
+        
         df['sma_50'] = ta.trend.SMAIndicator(close=df['close'], window=50).sma_indicator()
         
         # Calcular Bandas de Bollinger y MACD

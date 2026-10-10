@@ -1,3 +1,4 @@
+const API_BASE_URL = 'http://127.0.0.1:18767';
 // Elementos de UI
 const terminal = document.getElementById('terminal');
 const agentToggle = document.getElementById('agentToggle');
@@ -56,15 +57,27 @@ const smaSeries = chart.addLineSeries({
     color: '#3b82f6', // Azul brillante para la SMA 20
     lineWidth: 2,
     crosshairMarkerVisible: false,
-    priceLineVisible: false,
 });
 
 const vwapSeries = chart.addLineSeries({
-    color: '#f59e0b', // Naranja para VWAP
+    color: '#eab308', // Amarillo para VWAP principal
     lineWidth: 2,
+    lineStyle: 0, // Solid
+    crosshairMarkerVisible: false,
+});
+
+const vwapUpperSeries = chart.addLineSeries({
+    color: '#854d0e', // Amarillo oscuro apagado para Banda Superior
+    lineWidth: 1,
     lineStyle: 1, // Dotted
     crosshairMarkerVisible: false,
-    priceLineVisible: false,
+});
+
+const vwapLowerSeries = chart.addLineSeries({
+    color: '#854d0e', // Amarillo oscuro apagado para Banda Inferior
+    lineWidth: 1,
+    lineStyle: 1, // Dotted
+    crosshairMarkerVisible: false,
 });
 
 const symbolSelect = document.getElementById('symbolSelect');
@@ -199,6 +212,8 @@ symbolSelect.addEventListener('change', () => {
     candleSeries.setData([]); // Limpiar gráfico
     smaSeries.setData([]);
     vwapSeries.setData([]);
+    vwapUpperSeries.setData([]);
+    vwapLowerSeries.setData([]);
     fetchMarketData();
     updateSentiment();
 });
@@ -207,23 +222,29 @@ symbolSelect.addEventListener('change', () => {
 async function fetchMarketData() {
     try {
         logToTerminal(`Conectando al motor Python para obtener velas de ${currentSymbol}...`, 'info');
-        const response = await fetch(`http://localhost:18767/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
+        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
         const data = await response.json();
         if (data && !data.error) {
-            candleSeries.setData(data);
             
-            // Extraer y pintar la línea de Media Móvil (SMA 20)
-            const smaData = data
-                .filter(d => d.sma_20 !== undefined)
-                .map(d => ({ time: d.time, value: d.sma_20 }));
-            if (smaData.length > 0) {
-                smaSeries.setData(smaData);
-            }
-            const vwapData = data.filter(d => d.vwap !== undefined && d.vwap !== null).map(d => ({ time: d.time, value: d.vwap }));
-            if (vwapData.length > 0) {
-                vwapSeries.setData(vwapData);
+            try {
+                const cleanCandleData = data.map(d => ({time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}));
+                candleSeries.setData(cleanCandleData);
+                
+                const smaData = data.filter(d => typeof d.sma_20 === 'number' && !isNaN(d.sma_20)).map(d => ({ time: d.time, value: d.sma_20 }));
+                if (smaData.length > 0) smaSeries.setData(smaData);
+                
+                const vwapData = data.filter(d => typeof d.vwap === 'number' && !isNaN(d.vwap)).map(d => ({ time: d.time, value: d.vwap }));
+                if (vwapData.length > 0) vwapSeries.setData(vwapData);
+                
+                const vwapUpperData = data.filter(d => typeof d.vwap_upper === 'number' && !isNaN(d.vwap_upper)).map(d => ({ time: d.time, value: d.vwap_upper }));
+                if (vwapUpperData.length > 0) vwapUpperSeries.setData(vwapUpperData);
+                
+                const vwapLowerData = data.filter(d => typeof d.vwap_lower === 'number' && !isNaN(d.vwap_lower)).map(d => ({ time: d.time, value: d.vwap_lower }));
+                if (vwapLowerData.length > 0) vwapLowerSeries.setData(vwapLowerData);
+            } catch(e) {
+                logToTerminal("ERROR GRÁFICO: " + e.message, "error");
             }
             const currentPriceElement = document.getElementById('currentPrice');
             currentPrice = data[data.length - 1].close; 
@@ -294,7 +315,7 @@ agentToggle.addEventListener('click', () => {
                 const [tpStr, slStr] = tpSlVal.split('|');
                 const riskVal = document.getElementById('riskSelect')?.value || "0.25";
                 
-                const url = `http://localhost:18767/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}`;
+                const url = `${API_BASE_URL}/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}`;
                 const response = await fetch(url);
                 const data = await response.json();
                 
@@ -359,7 +380,7 @@ agentToggle.addEventListener('click', () => {
 // Ciclo de Gráfico en Vivo (Cada 2 segundos) para que se mueva rápido
 setInterval(async () => {
     try {
-        const response = await fetch(`http://localhost:18767/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
+        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
         const data = await response.json();
         if (data && data.length > 0) {
             const latest_candle = data[data.length - 1];
@@ -370,6 +391,12 @@ setInterval(async () => {
             }
             if (latest_candle.vwap !== undefined) {
                 vwapSeries.update({ time: latest_candle.time, value: latest_candle.vwap });
+            }
+            if (latest_candle.vwap_upper !== undefined) {
+                vwapUpperSeries.update({ time: latest_candle.time, value: latest_candle.vwap_upper });
+            }
+            if (latest_candle.vwap_lower !== undefined) {
+                vwapLowerSeries.update({ time: latest_candle.time, value: latest_candle.vwap_lower });
             }
             
             const currentPriceElement = document.getElementById('currentPrice');
@@ -407,7 +434,7 @@ setInterval(async () => {
 async function updateSentiment() {
     try {
         const source = document.getElementById('newsSourceSelect')?.value || 'coindesk';
-        const response = await fetch(`http://localhost:18767/api/market/sentiment?symbol=${currentSymbol}&source=${source}`);
+        const response = await fetch(`${API_BASE_URL}/api/market/sentiment?symbol=${currentSymbol}&source=${source}`);
         const data = await response.json();
         if (data && !data.error) {
             const badge = document.getElementById('sentimentScoreBadge');
@@ -499,14 +526,16 @@ function renderTradeHistory() {
 }
 
 function addTradeToHistory(signal, baseCoin, price, status, mode) {
-    const timeString = new Date().toLocaleTimeString();
-    tradeHistoryLog.unshift({ timeString, signal, baseCoin, price, status, mode });
+    const now = new Date();
+    const timeString = now.toLocaleTimeString();
+    const timestamp = now.toISOString();
+    tradeHistoryLog.unshift({ timeString, timestamp, signal, baseCoin, price, status, mode });
     
     // Guardar en persistencia local (navegador)
     localStorage.setItem('ai_trade_history', JSON.stringify(tradeHistoryLog));
     
     // Guardar en archivo persistente (backend CSV)
-    fetch('http://localhost:18767/api/log_trade', {
+    fetch(`${API_BASE_URL}/api/log_trade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ timeString, symbol: baseCoin, signal, price, status, mode })
@@ -621,7 +650,7 @@ document.getElementById('saveApiKeyBtn')?.addEventListener('click', async () => 
     const key = document.getElementById('apiKeyInput').value;
     if(!key) return;
     try {
-        const response = await fetch('http://localhost:18767/api/config/gemini', {
+        const response = await fetch(`${API_BASE_URL}/api/config/gemini`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({api_key: key})
@@ -643,6 +672,8 @@ document.getElementById('timeframeSelect')?.addEventListener('change', () => {
     candleSeries.setData([]);
     smaSeries.setData([]);
     vwapSeries.setData([]);
+    vwapUpperSeries.setData([]);
+    vwapLowerSeries.setData([]);
     fetchMarketData();
 });
 
@@ -659,3 +690,252 @@ document.getElementById('engineSelect')?.addEventListener('change', () => {
 });
 
 
+
+
+// --- FUNCIONALIDAD DE RESUMEN OPERATIVO ---
+
+function toggleResumen() {
+    const content = document.getElementById('resumenContent');
+    if (content.classList.contains('hidden')) {
+        content.classList.remove('hidden');
+        content.classList.add('block');
+        // Inicializar fechas con hoy por defecto
+        const hoy = new Date();
+        const ayer = new Date(hoy);
+        ayer.setDate(ayer.getDate() - 1);
+        
+        const formatForInput = (d) => {
+            const pad = (n) => n.toString().padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+        
+        if (!document.getElementById('resumenStartDate').value) {
+            document.getElementById('resumenStartDate').value = formatForInput(ayer);
+        }
+        if (!document.getElementById('resumenEndDate').value) {
+            document.getElementById('resumenEndDate').value = formatForInput(hoy);
+        }
+    } else {
+        content.classList.remove('block');
+        content.classList.add('hidden');
+    }
+}
+
+let chartInstance = null;
+
+function generarResumen() {
+    const startInput = document.getElementById('resumenStartDate').value;
+    const endInput = document.getElementById('resumenEndDate').value;
+    
+    if (!startInput || !endInput) {
+        alert("Por favor selecciona ambas fechas.");
+        return;
+    }
+    
+    const startTime = new Date(startInput).getTime();
+    const endTime = new Date(endInput).getTime();
+    
+    // Filtrar operaciones dentro del rango, asumiendo un timestamp ISO, si no tienen, usamos una heurística o las ignoramos
+    // Para trades viejos sin timestamp, asumimos que ocurrieron antes, así que podemos dejarlos fuera o incluirlos
+
+    let tradesEnRango = tradeHistoryLog.filter(t => {
+        let tTime;
+        if (!t.timestamp) {
+            // Fallback para trades antiguos: asume el día de hoy con la hora de timeString
+            const now = new Date();
+            const dateStr = now.toISOString().split('T')[0];
+            tTime = new Date(`${dateStr} ${t.timeString}`).getTime();
+        } else {
+            tTime = new Date(t.timestamp).getTime();
+        }
+        return tTime >= startTime && tTime <= endTime && t.status === 'Ejecutada';
+    });
+    
+    // Si queremos incluir trades de prueba sin timestamp
+    if (tradesEnRango.length === 0) {
+        // En caso de que todo el historial no tenga timestamp, lo tomamos todo como fallback si el usuario eligió un rango muy amplio
+        // O mejor solo mostrar mensaje
+    }
+    
+    // Ordenar de más antiguo a más reciente (tradeHistoryLog está de más reciente a antiguo)
+    tradesEnRango.reverse();
+    
+    // Emparejar compras y ventas para sacar profit cerrado
+    let posicionesAbiertas = {};
+    let tradesCerrados = [];
+    
+    tradesEnRango.forEach(trade => {
+        const asst = trade.baseCoin;
+        const precio = parseFloat(trade.price);
+        
+        if (trade.signal === 'COMPRAR') {
+            if (!posicionesAbiertas[asst]) {
+                posicionesAbiertas[asst] = [];
+            }
+            posicionesAbiertas[asst].push({ precioCompra: precio, timestamp: trade.timestamp, timeString: trade.timeString });
+        } else if (trade.signal === 'VENDER') {
+            if (posicionesAbiertas[asst] && posicionesAbiertas[asst].length > 0) {
+                const compra = posicionesAbiertas[asst].shift();
+                const pnl = precio - compra.precioCompra;
+                const pnlPercent = (pnl / compra.precioCompra) * 100;
+                
+                tradesCerrados.push({
+                    activo: asst,
+                    compra: compra.precioCompra,
+                    venta: precio,
+                    pnl: pnl,
+                    pnlPercent: pnlPercent,
+                    timeStringCompra: compra.timeString,
+                    timeStringVenta: trade.timeString,
+                    timestampVenta: trade.timestamp
+                });
+            }
+        }
+    });
+    
+    // Calcular estadísticas
+    const totalTrades = tradesCerrados.length;
+    let winTrades = 0;
+    let totalPnl = 0;
+    let capitalInvertidoEstimado = 0;
+    
+    tradesCerrados.forEach(t => {
+        if (t.pnl > 0) winTrades++;
+        totalPnl += t.pnl;
+        capitalInvertidoEstimado += t.compra; // Estimación simple
+    });
+    
+    const winRate = totalTrades > 0 ? ((winTrades / totalTrades) * 100).toFixed(2) : 0;
+    
+    // Calcular Capitales (Global)
+    const capInicial = parseFloat(document.getElementById('resumenInitialCap').value) || 100000;
+    const currency = getCurrency(currentSymbol) || 'USDT';
+    
+    // Dinero Final = Saldo en Bóveda + (Cantidad de Activo * Precio Actual)
+    let asstValue = 0;
+    if (portfolio.ASSET && portfolio.ASSET > 0) {
+        asstValue = portfolio.ASSET * currentPrice;
+    }
+    const capFinal = (portfolio.balances && portfolio.balances[currency] !== undefined) 
+                        ? portfolio.balances[currency] + asstValue 
+                        : (portfolio[currency] || 0) + asstValue;
+                        
+    const resultadoNeto = capFinal - capInicial;
+    const rentabilidadGlobal = capInicial > 0 ? ((resultadoNeto / capInicial) * 100).toFixed(2) : 0;
+    
+    // Actualizar UI
+    document.getElementById('resumenStats').classList.remove('hidden');
+    
+    // Stats Nuevos
+    document.getElementById('resDineroInicial').innerText = `$${capInicial.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+    document.getElementById('resDineroFinal').innerText = `$${capFinal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+    
+    const sign = resultadoNeto >= 0 ? '+' : '';
+    const colorPnl = resultadoNeto >= 0 ? (resultadoNeto > 0 ? 'text-green-400' : 'text-gray-400') : 'text-red-400';
+    
+    const elResultado = document.getElementById('resResultadoNeto');
+    elResultado.innerText = `${sign}$${Math.abs(resultadoNeto).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+    elResultado.className = `text-xl font-bold ${colorPnl}`;
+    
+    const elPorcentaje = document.getElementById('resPorcentaje');
+    elPorcentaje.innerText = `${sign}${rentabilidadGlobal}%`;
+    elPorcentaje.className = `text-xl font-bold ${colorPnl}`;
+    
+    // Stats de Rango
+    document.getElementById('resTotalTrades').innerText = totalTrades;
+    document.getElementById('resWinRate').innerText = `${winRate}%`;
+    document.getElementById('resWinRate').className = winRate >= 50 ? 'text-xl font-bold text-green-400' : 'text-xl font-bold text-red-400';
+    
+    // Actualizar tabla detalle
+    document.getElementById('resumenDetalle').classList.remove('hidden');
+    const tbody = document.getElementById('resumenDetalleBody');
+    tbody.innerHTML = '';
+    
+    if (tradesCerrados.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones de ciclo completo (Compra y Venta) en este periodo.</td></tr>`;
+    } else {
+        tradesCerrados.forEach(t => {
+            const tr = document.createElement('tr');
+            const colorTr = t.pnl > 0 ? 'text-green-400' : 'text-red-400';
+            const signTr = t.pnl > 0 ? '+' : '';
+            tr.innerHTML = `
+                <td class="px-4 py-2">${new Date(t.timestampVenta).toLocaleString()}</td>
+                <td class="px-4 py-2 font-bold">${t.activo}</td>
+                <td class="px-4 py-2 text-gray-300">$${t.compra.toFixed(2)}</td>
+                <td class="px-4 py-2 text-gray-300">$${t.venta.toFixed(2)}</td>
+                <td class="px-4 py-2 font-bold ${colorTr}">${signTr}$${Math.abs(t.pnl).toFixed(2)} (${signTr}${t.pnlPercent.toFixed(2)}%)</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+    
+    // Actualizar Gráfico
+    document.getElementById('resumenChartWrapper').classList.remove('hidden');
+    renderChart(tradesCerrados);
+}
+
+function renderChart(trades) {
+    const ctx = document.getElementById('resumenChart').getContext('2d');
+    
+    if (chartInstance) {
+        chartInstance.destroy();
+    }
+    
+    let labels = [];
+    let cumulativePnl = [0];
+    let currentPnl = 0;
+    
+    trades.forEach((t, index) => {
+        labels.push(`Trade ${index + 1}`);
+        currentPnl += t.pnl;
+        cumulativePnl.push(currentPnl);
+    });
+    
+    // Necesitamos el "0" inicial, así que agregamos un label
+    labels.unshift('Inicio');
+    
+    chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'P&L Acumulado ($)',
+                data: cumulativePnl,
+                borderColor: '#10B981', // Verde
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#9CA3AF' } }
+            },
+            scales: {
+                x: { ticks: { color: '#9CA3AF' }, grid: { color: '#374151' } },
+                y: { ticks: { color: '#9CA3AF' }, grid: { color: '#374151' } }
+            }
+        }
+    });
+}
+
+
+// Inicializar fechas del Resumen Operativo al cargar
+document.addEventListener('DOMContentLoaded', () => {
+    const hoy = new Date();
+    const ayer = new Date(hoy);
+    ayer.setDate(ayer.getDate() - 1);
+    
+    const formatForInput = (d) => {
+        const pad = (n) => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    
+    const startInput = document.getElementById('resumenStartDate');
+    const endInput = document.getElementById('resumenEndDate');
+    if (startInput && !startInput.value) startInput.value = formatForInput(ayer);
+    if (endInput && !endInput.value) endInput.value = formatForInput(hoy);
+});

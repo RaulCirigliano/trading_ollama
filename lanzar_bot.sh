@@ -15,7 +15,7 @@ uvicorn backend.main:app --host 127.0.0.1 --port 18767 &
 BACKEND_PID=$!
 
 echo "Iniciando la Interfaz Visual (Frontend)..."
-python3 -m http.server 18087 &
+python3 -m http.server 18087 --directory frontend &
 FRONTEND_PID=$!
 
 echo "Esperando 2 segundos para que los servidores arranquen..."
