@@ -57,6 +57,8 @@ const smaSeries = chart.addLineSeries({
     color: '#3b82f6', // Azul brillante para la SMA 20
     lineWidth: 2,
     crosshairMarkerVisible: false,
+    lastValueVisible: false, // Ocultar etiqueta en columna vertical
+    priceLineVisible: false, // Ocultar línea de precio actual
 });
 
 const vwapSeries = chart.addLineSeries({
@@ -64,6 +66,8 @@ const vwapSeries = chart.addLineSeries({
     lineWidth: 2,
     lineStyle: 0, // Solid
     crosshairMarkerVisible: false,
+    lastValueVisible: false,
+    priceLineVisible: false,
 });
 
 const vwapUpperSeries = chart.addLineSeries({
@@ -71,6 +75,8 @@ const vwapUpperSeries = chart.addLineSeries({
     lineWidth: 1,
     lineStyle: 1, // Dotted
     crosshairMarkerVisible: false,
+    lastValueVisible: false,
+    priceLineVisible: false,
 });
 
 const vwapLowerSeries = chart.addLineSeries({
@@ -78,6 +84,43 @@ const vwapLowerSeries = chart.addLineSeries({
     lineWidth: 1,
     lineStyle: 1, // Dotted
     crosshairMarkerVisible: false,
+    lastValueVisible: false,
+    priceLineVisible: false,
+});
+
+// Leyenda dinámica al hacer hover
+const legendOhlc = document.getElementById('legend-ohlc');
+const legendSma = document.getElementById('legend-sma');
+const legendVwap = document.getElementById('legend-vwap');
+const legendVwapBands = document.getElementById('legend-vwap-bands');
+
+chart.subscribeCrosshairMove((param) => {
+    if (!param.point || !param.time || param.point.x < 0 || param.point.x > chartContainer.clientWidth || param.point.y < 0 || param.point.y > chartContainer.clientHeight) {
+        return; // Fuera del gráfico
+    }
+
+    const candleData = param.seriesData.get(candleSeries);
+    if (candleData && candleData.close !== undefined) {
+        legendOhlc.innerHTML = `Ape: ${candleData.open.toFixed(2)} | Máx: ${candleData.high.toFixed(2)} | Mín: ${candleData.low.toFixed(2)} | Cierre: ${candleData.close.toFixed(2)}`;
+        let color = candleData.close >= candleData.open ? 'text-green-400' : 'text-red-400';
+        legendOhlc.className = color;
+    }
+    
+    const smaData = param.seriesData.get(smaSeries);
+    if (smaData && smaData.value !== undefined) {
+        legendSma.innerHTML = `SMA 20: ${smaData.value.toFixed(2)}`;
+    }
+    
+    const vwapData = param.seriesData.get(vwapSeries);
+    if (vwapData && vwapData.value !== undefined) {
+        legendVwap.innerHTML = `VWAP: ${vwapData.value.toFixed(2)}`;
+    }
+    
+    const vwapUpperData = param.seriesData.get(vwapUpperSeries);
+    const vwapLowerData = param.seriesData.get(vwapLowerSeries);
+    if (vwapUpperData && vwapLowerData && vwapUpperData.value !== undefined && vwapLowerData.value !== undefined) {
+        if(legendVwapBands) legendVwapBands.innerHTML = `Bandas: ${vwapUpperData.value.toFixed(2)} / ${vwapLowerData.value.toFixed(2)}`;
+    }
 });
 
 const symbolSelect = document.getElementById('symbolSelect');
@@ -85,15 +128,15 @@ let currentSymbol = symbolSelect.value;
 let currentPrice = 0;
 
 // Variables de Simulación (Paper Trading) persistentes en el navegador
-let portfolio = JSON.parse(localStorage.getItem('ai_portfolio_v2')) || {
+let portfolio = JSON.parse(localStorage.getItem('ai_portfolio_v3')) || {
+    VAULT: 1000.00, // Capital total en la Bóveda del Broker (USD)
     balances: {
-        USDT: 100.00,
-        USD: 1000.00,
-        ARS: 500000.00
+        USDT: 0.00, // Cripto vacía por defecto
+        USD: 0.00,  // Wall Street vacía por defecto
+        ARS: 0.00   // Local vacía por defecto
     },
     ASSET: 0,
-    entryPrice: 0,
-    VAULT: 0
+    entryPrice: 0
 };
 
 function getCurrency(symbol) {
@@ -103,21 +146,25 @@ function getCurrency(symbol) {
     return 'USD';
 }
 
-// Mecanismo de Cordura (Sanity Check) para evitar Save Corruption (NaN o variables faltantes)
-if (!portfolio.balances) portfolio.balances = { USDT: 100, USD: 1000, ARS: 500000 };
-if (typeof portfolio.balances.USDT !== 'number' || isNaN(portfolio.balances.USDT)) portfolio.balances.USDT = 100.00;
-if (typeof portfolio.balances.USD !== 'number' || isNaN(portfolio.balances.USD)) portfolio.balances.USD = 1000.00;
-if (typeof portfolio.balances.ARS !== 'number' || isNaN(portfolio.balances.ARS)) portfolio.balances.ARS = 500000.00;
+// Mecanismo de Cordura (Sanity Check) para evitar Save Corruption
+if (!portfolio.balances) portfolio.balances = { USDT: 0, USD: 0, ARS: 0 };
+if (!portfolio.deposits) portfolio.deposits = { USDT: 0, USD: 0, ARS: 0 };
+if (typeof portfolio.balances.USDT !== 'number' || isNaN(portfolio.balances.USDT)) portfolio.balances.USDT = 0;
+if (typeof portfolio.balances.USD !== 'number' || isNaN(portfolio.balances.USD)) portfolio.balances.USD = 0;
+if (typeof portfolio.balances.ARS !== 'number' || isNaN(portfolio.balances.ARS)) portfolio.balances.ARS = 0;
+if (typeof portfolio.deposits.USDT !== 'number' || isNaN(portfolio.deposits.USDT)) portfolio.deposits.USDT = 0;
+if (typeof portfolio.deposits.USD !== 'number' || isNaN(portfolio.deposits.USD)) portfolio.deposits.USD = 0;
+if (typeof portfolio.deposits.ARS !== 'number' || isNaN(portfolio.deposits.ARS)) portfolio.deposits.ARS = 0;
+if (typeof portfolio.VAULT !== 'number' || isNaN(portfolio.VAULT)) portfolio.VAULT = 1000.00;
 if (typeof portfolio.ASSET !== 'number' || isNaN(portfolio.ASSET)) portfolio.ASSET = 0;
 if (typeof portfolio.entryPrice !== 'number' || isNaN(portfolio.entryPrice)) portfolio.entryPrice = 0;
-if (typeof portfolio.VAULT !== 'number' || isNaN(portfolio.VAULT)) portfolio.VAULT = 0;
 
 let tradeHistoryLog = JSON.parse(localStorage.getItem('ai_trade_history')) || [];
 if (!Array.isArray(tradeHistoryLog)) tradeHistoryLog = [];
 
 // Función de reseteo para limpiar la memoria si el usuario quiere empezar de cero
 window.resetearCuenta = function() {
-    localStorage.removeItem('ai_portfolio_v2');
+    localStorage.removeItem('ai_portfolio_v3');
     // No borramos 'ai_trade_history' para que el registro histórico sea eterno
     location.reload();
 };
@@ -126,19 +173,13 @@ function updateCapitalDisplay() {
     let currency = getCurrency(currentSymbol);
     let total = portfolio.balances[currency] + (portfolio.ASSET * currentPrice);
     
-    // Milestone Checker (Toma de Ganancias Automática a la Bóveda)
-    const autoVaultToggle = document.getElementById('autoVaultToggle');
-    if (autoVaultToggle && autoVaultToggle.checked && total >= 200.00 && portfolio.ASSET === 0) { // Solo transferimos si no hay posiciones abiertas
-        portfolio.balances[currency] -= 100.00;
-        portfolio.VAULT += 100.00;
-        total -= 100.00;
-        localStorage.setItem('ai_portfolio_v2', JSON.stringify(portfolio));
-        logToTerminal(`🏦 HITO ALCANZADO: Capital duplicado. $100 transferidos a la Bóveda Segura Intocable.`, 'action');
-    }
-
     const currencySymbols = { 'USDT': 'USDT', 'USD': 'USD', 'ARS': 'ARS' };
     const curSym = currencySymbols[currency] || '$';
     document.getElementById('capitalDisplay').innerText = `$${total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${curSym}`;
+    
+    // Actualizar datos en el Modal de Tesorería
+    const modalVault = document.getElementById('modalVaultUSD');
+    if (modalVault) modalVault.innerText = `$${portfolio.VAULT.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     
     // Actualizar Billeteras en UI
     const vaultDisplay = document.getElementById('vaultDisplay');
@@ -217,6 +258,71 @@ symbolSelect.addEventListener('change', () => {
     fetchMarketData();
     updateSentiment();
 });
+
+// --- GESTOR DE TESORERÍA (CUENTAS ÓMNIBUS) ---
+window.ejecutarTransferencia = function() {
+    const destWallet = document.getElementById('tesoreriaWalletSelect').value;
+    const amountStr = document.getElementById('tesoreriaAmount').value;
+    const amount = parseFloat(amountStr);
+    
+    if (isNaN(amount) || amount <= 0) {
+        alert("Ingresa un monto válido.");
+        return;
+    }
+    
+    // Calcular costo en USD de la Bóveda (Tasa simulada: 1 USD = 1 USDT = 1000 ARS)
+    let costoUSD = amount;
+    if (destWallet === 'ARS') {
+        costoUSD = amount / 1000.00;
+    }
+    
+    if (portfolio.VAULT < costoUSD) {
+        alert(`❌ Fondos insuficientes en la Bóveda.\nIntentas sacar $${costoUSD.toFixed(2)} USD pero solo tienes $${portfolio.VAULT.toFixed(2)} USD.`);
+        return;
+    }
+    
+    // Ejecutar Transferencia
+    portfolio.VAULT -= costoUSD;
+    portfolio.balances[destWallet] += amount;
+    portfolio.deposits[destWallet] += amount; // Registrar la base para calcular ganancias limpias
+    
+    localStorage.setItem('ai_portfolio_v3', JSON.stringify(portfolio));
+    updateCapitalDisplay();
+    document.getElementById('tesoreriaModal').classList.add('hidden');
+    document.getElementById('tesoreriaAmount').value = '';
+    
+    logToTerminal(`🏦 TESORERÍA: Transferidos ${amount} ${destWallet} a la billetera operativa.`, 'action');
+};
+
+window.sweepBackAll = function() {
+    if (portfolio.ASSET > 0) {
+        alert("No puedes vaciar la billetera mientras tengas posiciones abiertas. Cierra la operación primero.");
+        return;
+    }
+    
+    // Regresar USD y USDT 1 a 1
+    portfolio.VAULT += portfolio.balances.USD;
+    portfolio.VAULT += portfolio.balances.USDT;
+    // Regresar ARS (1000 a 1)
+    portfolio.VAULT += (portfolio.balances.ARS / 1000.00);
+    
+    portfolio.balances.USD = 0;
+    portfolio.balances.USDT = 0;
+    portfolio.balances.ARS = 0;
+    
+    // Resetear base de depósitos al vaciar
+    portfolio.deposits.USD = 0;
+    portfolio.deposits.USDT = 0;
+    portfolio.deposits.ARS = 0;
+    portfolio.balances.USDT = 0;
+    portfolio.balances.ARS = 0;
+    
+    localStorage.setItem('ai_portfolio_v3', JSON.stringify(portfolio));
+    updateCapitalDisplay();
+    document.getElementById('tesoreriaModal').classList.add('hidden');
+    
+    logToTerminal(`🧹 SWEEP-BACK: Todas las billeteras operativas vaciadas. Capital devuelto a la Bóveda.`, 'action');
+};
 
 // Obtener datos reales del motor Python
 async function fetchMarketData() {
@@ -333,7 +439,8 @@ agentToggle.addEventListener('click', () => {
                     const baseCoin = currentSymbol.split('/')[0];
                     const executionMode = document.getElementById('executionModeSelect')?.value || 'copilot';
                     
-                    const isBuyable = data.signal === 'COMPRAR' && portfolio.balances[getCurrency(currentSymbol)] > 10;
+                    // Permitir que la orden viaje al Ejecutor (ExecuteTrade será el encargado de rechazarla si no hay fondos)
+                    const isBuyable = data.signal === 'COMPRAR';
                     const isSellable = data.signal === 'VENDER' && portfolio.ASSET > 0.0001;
                     
                     if (isBuyable || isSellable) {
@@ -469,7 +576,7 @@ async function updateSentiment() {
                 div.className = `bg-gray-900 p-2 rounded border-l-2 ${colorClass}`;
                 div.innerHTML = `
                     <p class="text-[10px] text-gray-400 flex justify-between">
-                        <span>📰 CoinDesk</span>
+                        <span>📰 ${data.fuente || 'Noticias'}</span>
                         <span>Score: ${news.score}</span>
                     </p>
                     <p class="text-xs text-gray-200 mt-1">${news.title}</p>
@@ -585,10 +692,31 @@ function executeTrade(signal, baseCoin, price, mode = 'Automático') {
         portfolio.ASSET = 0;
         portfolio.entryPrice = 0;
         logToTerminal(`💵 SIMULACIÓN: VENDIDO ${baseCoin} a $${price.toLocaleString()}. Nuevo Saldo ${currency}: $${portfolio.balances[currency].toFixed(2)}`, 'error');
+        
+        // --- LÓGICA DE AUTO-ASEGURAR GANANCIAS ---
+        const autoVaultToggle = document.getElementById('autoVaultToggle');
+        if (autoVaultToggle && autoVaultToggle.checked && portfolio.deposits[currency] > 0) {
+            const threshold = parseFloat(document.getElementById('autoVaultThreshold')?.value || "50");
+            const profitPct = ((portfolio.balances[currency] - portfolio.deposits[currency]) / portfolio.deposits[currency]) * 100;
+            
+            if (profitPct >= threshold) {
+                const profitToSweep = portfolio.balances[currency] - portfolio.deposits[currency];
+                portfolio.balances[currency] -= profitToSweep;
+                
+                // Convertir ganancia a USD si es necesario y mandar a bóveda
+                if (currency === 'ARS') {
+                    portfolio.VAULT += (profitToSweep / 1000.00);
+                } else {
+                    portfolio.VAULT += profitToSweep;
+                }
+                
+                logToTerminal(`🔒 AUTO-VAULT: Rentabilidad del ${profitPct.toFixed(2)}% alcanzada. Ganancia de $${profitToSweep.toFixed(2)} transferida a la Bóveda Segura.`, 'action');
+            }
+        }
     }
     
     // Guardar en el navegador (Persistencia)
-    localStorage.setItem('ai_portfolio_v2', JSON.stringify(portfolio));
+    localStorage.setItem('ai_portfolio_v3', JSON.stringify(portfolio));
     
     updateCapitalDisplay();
     addTradeToHistory(signal, baseCoin, price, 'Ejecutada', mode);
@@ -649,7 +777,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Funciones interactivas de la Bóveda
 window.inyectarCapital = function(amount) {
     portfolio.balances[getCurrency(currentSymbol)] += amount;
-    localStorage.setItem('ai_portfolio_v2', JSON.stringify(portfolio));
+    localStorage.setItem('ai_portfolio_v3', JSON.stringify(portfolio));
     logToTerminal(`💸 DEPÓSITO: Se han inyectado $${amount} de liquidez al Agente.`, 'action');
     updateCapitalDisplay();
 };
@@ -695,9 +823,59 @@ document.getElementById('tpSlSelect')?.addEventListener('change', () => {
     logToTerminal(`Límites de ganancia/pérdida actualizados a: ${document.getElementById('tpSlSelect').options[document.getElementById('tpSlSelect').selectedIndex].text}`, 'info');
 });
 
+function updateBrainBadge() {
+    const engineSelect = document.getElementById('engineSelect');
+    const orquestadorBox = document.getElementById('orquestadorBox');
+    const brainIcon = document.getElementById('brainIcon');
+    const statusBadge = document.getElementById('engineStatusBadge');
+    
+    if (!engineSelect) return;
+    
+    const value = engineSelect.value;
+    const text = engineSelect.options[engineSelect.selectedIndex].text;
+    
+    // Sincronizar el texto del badge de lectura
+    if (statusBadge) {
+        statusBadge.innerText = text;
+        statusBadge.className = "w-full rounded p-2 text-xs font-bold border mt-2 flex justify-center items-center shadow-inner transition-colors duration-300 ";
+    }
+    
+    // Reset classes
+    engineSelect.className = "w-full bg-gray-900 text-white text-sm rounded p-1.5 border border-gray-700 cursor-pointer relative z-20 mb-3 ";
+    if(orquestadorBox) orquestadorBox.className = "p-2 rounded border shadow-md transition-all duration-500 ";
+    
+    // Animar el cerebro (efecto latido)
+    if (brainIcon) {
+        brainIcon.classList.add('scale-125');
+        setTimeout(() => brainIcon.classList.remove('scale-125'), 300);
+    }
+    
+    if (value === 'deepseek') {
+        if(statusBadge) statusBadge.className += "bg-blue-900 text-blue-300 border-blue-500";
+        if(orquestadorBox) orquestadorBox.className += "bg-gray-800 border-blue-500 shadow-blue-500/20";
+        if(brainIcon) brainIcon.style.filter = "drop-shadow(0 0 5px #3b82f6)";
+    } else if (value === 'ollama') {
+        if(statusBadge) statusBadge.className += "bg-gray-700 text-gray-300 border-gray-500";
+        if(orquestadorBox) orquestadorBox.className += "bg-gray-700 border-gray-500";
+        if(brainIcon) brainIcon.style.filter = "none";
+    } else if (value === 'ai') {
+        if(statusBadge) statusBadge.className += "bg-purple-900 text-purple-300 border-purple-500";
+        if(orquestadorBox) orquestadorBox.className += "bg-gray-800 border-purple-500 shadow-purple-500/20";
+        if(brainIcon) brainIcon.style.filter = "drop-shadow(0 0 5px #a855f7)";
+    } else {
+        if(statusBadge) statusBadge.className += "bg-green-900 text-green-300 border-green-500";
+        if(orquestadorBox) orquestadorBox.className += "bg-gray-800 border-green-500 shadow-green-500/20";
+        if(brainIcon) brainIcon.style.filter = "drop-shadow(0 0 5px #22c55e)";
+    }
+}
+
 document.getElementById('engineSelect')?.addEventListener('change', () => {
+    updateBrainBadge();
     logToTerminal(`Motor de Análisis cambiado a: ${document.getElementById('engineSelect').options[document.getElementById('engineSelect').selectedIndex].text}`, 'warn');
 });
+
+// Inicializar el estilo al cargar la página
+setTimeout(updateBrainBadge, 500);
 
 
 
