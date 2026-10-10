@@ -500,12 +500,19 @@ function renderTradeHistory() {
     if (!tbody) return;
     tbody.innerHTML = '';
     
-    if (tradeHistoryLog.length === 0) {
-        tbody.innerHTML = `<tr id="emptyHistoryRow"><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones registradas aún.</td></tr>`;
+    const todayStr = new Date().toDateString();
+    const todaysTrades = tradeHistoryLog.filter(trade => {
+        // Fallback para fechas: si no tiene timestamp, asumimos que no es de hoy
+        if (!trade.timestamp) return false; 
+        return new Date(trade.timestamp).toDateString() === todayStr;
+    });
+
+    if (todaysTrades.length === 0) {
+        tbody.innerHTML = `<tr id="emptyHistoryRow"><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones registradas en el día de hoy.</td></tr>`;
         return;
     }
     
-    tradeHistoryLog.forEach(trade => {
+    todaysTrades.forEach(trade => {
         let statusClass = 'text-gray-400';
         if (trade.status === 'Ejecutada') statusClass = 'text-green-400 font-bold';
         if (trade.status === 'Rechazada') statusClass = 'text-red-400 font-bold';
