@@ -64,6 +64,51 @@
         </div>
     </nav>
 
+
+    <!-- ==================== LOBBY MACRO ==================== -->
+    <div id="lobbyView" class="container mx-auto p-4 mt-8 max-w-4xl mb-32">
+        <div class="bg-gray-800 rounded-lg p-8 shadow-2xl border border-gray-700 text-center">
+            <h1 class="text-3xl font-bold text-yellow-500 mb-4">🔭 Despertar del Sistema (Pre-Market)</h1>
+            <p class="text-gray-400 mb-8">Antes de iniciar operaciones automáticas, lee el reporte del Agente de Inversiones sobre el fin de semana para decidir el mercado adecuado.</p>
+            
+            <button id="btnLobbyPremarket" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg text-lg transition shadow-lg mb-6 flex items-center justify-center mx-auto gap-2">
+                <span class="animate-pulse">🧠</span> Generar Consenso del Cerebro
+            </button>
+            
+            <div id="lobbyReportBox" class="bg-gray-900 border border-gray-600 rounded p-4 text-left text-sm text-gray-300 hidden mb-8 overflow-y-auto max-h-60">
+                <!-- Aquí se imprime el reporte -->
+            </div>
+            
+            <hr class="border-gray-700 mb-8">
+            
+            <h2 class="text-xl font-bold text-white mb-4">Selección de Estrategia</h2>
+            <div class="flex flex-col md:flex-row justify-center items-center gap-4 mb-8">
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1 text-left">Activo a Operar:</label>
+                    <!-- Moveremos o clonaremos el selector aquí por JS -->
+                    <select id="lobbySymbolSelect" class="bg-gray-900 text-white p-2 rounded border border-gray-600 outline-none w-64">
+                        <option value="BTC/USDT">BTC / USDT</option>
+                        <option value="ETH/USDT">ETH / USDT</option>
+                        <option value="AAPL">Apple (AAPL)</option>
+                        <option value="SPY">S&P 500 (SPY)</option>
+                        <option value="GOLD">Oro (GOLD)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1 text-left">Presupuesto ($):</label>
+                    <input type="number" id="lobbyCapital" value="1000" class="bg-gray-900 text-white p-2 rounded border border-gray-600 outline-none w-32">
+                </div>
+            </div>
+            
+            <button id="btnEnterTrench" class="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-12 rounded-lg text-xl transition shadow-[0_0_15px_rgba(34,197,94,0.5)]">
+                🚀 INICIAR TRINCHERA (LIVE TRADING)
+            </button>
+        </div>
+    </div>
+
+    <!-- ==================== TRINCHERA (LIVE TRADING) ==================== -->
+    <div id="tradingView" class="hidden">
+
     <!-- Main Content -->
     <div class="container mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6 mt-4">
         
@@ -373,7 +418,12 @@
                     <!-- Radar Macro (Agente de Inversiones) -->
                     <div class="bg-gray-900 p-3 rounded border border-yellow-500/50 shadow-inner mt-2">
                         <div class="mb-2 border-b border-gray-700 pb-2 flex justify-between items-center">
-                            <h2 class="text-sm font-semibold text-yellow-500">🔭 Radar de Oportunidades (IA)</h2>
+                                                        <h2 class="text-sm font-semibold text-yellow-500 flex items-center gap-2">
+                                🔭 Radar de Oportunidades (IA)
+                                <button id="btnPremarket" class="bg-blue-600 hover:bg-blue-500 text-white text-[10px] px-2 py-1 rounded transition-colors hidden shadow-sm border border-blue-400">
+                                    Despertar Cerebro (Pre-Market)
+                                </button>
+                            </h2>
                             <span id="radarLiveStatus" class="text-[10px] bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded border border-gray-500/50 transition-colors">OFF</span>
                         </div>
                         
@@ -651,5 +701,6 @@
     </div>
 
     <script src="js/app.js?v=6"></script>
+    </div>
 </body>
 </html>

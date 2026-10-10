@@ -488,6 +488,8 @@ agentToggle.addEventListener('click', () => {
 
 // Ciclo de Gráfico en Vivo (Cada 2 segundos) para que se mueva rápido
 setInterval(async () => {
+    const lobby = document.getElementById("lobbyView");
+    if (lobby && !lobby.classList.contains("hidden")) return; // No hacer nada si estamos en el Lobby
     try {
         const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
         const data = await response.json();
@@ -601,6 +603,9 @@ if (newsSourceSelect) {
 
 // --- Agente de Inversiones (Radar Macro) ---
 async function updateMacroRadar() {
+    const lobby = document.getElementById("lobbyView");
+    if (lobby && !lobby.classList.contains("hidden")) return; // Pausado en el Lobby
+
     const toggle = document.getElementById('investmentToggle');
     const container = document.getElementById('macroOpportunitiesContainer');
     if (!toggle || !container) return;
@@ -1194,4 +1199,171 @@ document.addEventListener('DOMContentLoaded', () => {
     const endInput = document.getElementById('resumenEndDate');
     if (startInput && !startInput.value) startInput.value = formatForInput(ayer);
     if (endInput && !endInput.value) endInput.value = formatForInput(hoy);
+});
+
+// --- PRE-MARKET DIGEST LOGIC ---
+const btnPremarket = document.getElementById("btnPremarket");
+if (btnPremarket) {
+    btnPremarket.addEventListener("click", async () => {
+        btnPremarket.innerText = "Analizando buzón...";
+        btnPremarket.disabled = true;
+        
+        const engine = document.getElementById("aiEngineSelect") ? document.getElementById("aiEngineSelect").value : "ollama";
+        
+        logToTerminal("Iniciando secuencia de Despertar Pre-Market...", "info");
+        
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`);
+            const data = await res.json();
+            
+            if (data.status === "error") {
+                logToTerminal(`Error Pre-Market: ${data.message}`, "error");
+                btnPremarket.innerText = "Error";
+                setTimeout(() => { btnPremarket.innerText = "Despertar Cerebro (Pre-Market)"; btnPremarket.disabled = false; }, 3000);
+                return;
+            }
+            
+            if (data.status === "idle") {
+                logToTerminal(`Pre-Market: ${data.message}`, "info");
+                btnPremarket.innerText = "Buzón Vacío";
+                setTimeout(() => { btnPremarket.innerText = "Despertar Cerebro (Pre-Market)"; btnPremarket.disabled = false; }, 3000);
+                return;
+            }
+            
+            // Éxito
+            window.premarketData = data; // Guardamos globalmente
+            logToTerminal(`PRE-MARKET COMPLETADO: ${data.resumen_general}`, "success");
+            
+            // Si hay activos analizados, los listamos en el terminal
+            if (data.activos && data.activos.length > 0) {
+                data.activos.forEach(a => {
+                    const color = a.consenso_direccional === "ALCISTA" ? "text-green-400" : (a.consenso_direccional === "BAJISTA" || a.consenso_direccional === "PELIGRO" ? "text-red-400" : "text-yellow-400");
+                    logToTerminal(`Consenso [${a.simbolo}]: <span class="${color} font-bold">${a.consenso_direccional}</span>. Razón: ${a.razonamiento}. Autorizado: ${a.autorizar_operacion}`, "system");
+                });
+            }
+            
+            btnPremarket.innerText = "Consenso Listo";
+            btnPremarket.classList.replace("bg-blue-600", "bg-green-600");
+            setTimeout(() => { 
+                btnPremarket.innerText = "Despertar Cerebro (Pre-Market)"; 
+                btnPremarket.classList.replace("bg-green-600", "bg-blue-600");
+                btnPremarket.disabled = false; 
+            }, 5000);
+            
+        } catch (e) {
+            logToTerminal(`Error de red al consultar Pre-Market: ${e.message}`, "error");
+            btnPremarket.innerText = "Despertar Cerebro (Pre-Market)";
+            btnPremarket.disabled = false;
+        }
+    });
+}
+// Mostrar el botón si el toggle de inversiones está activado
+// removed redeclaration
+if (investmentToggle && btnPremarket) {
+    investmentToggle.addEventListener("change", (e) => {
+        if (e.target.checked) {
+            btnPremarket.classList.remove("hidden");
+        } else {
+            btnPremarket.classList.add("hidden");
+        }
+    });
+}
+
+// --- LÓGICA DEL LOBBY MACRO ---
+document.addEventListener("DOMContentLoaded", () => {
+    const btnLobbyPremarket = document.getElementById("btnLobbyPremarket");
+    const lobbyReportBox = document.getElementById("lobbyReportBox");
+    const btnEnterTrench = document.getElementById("btnEnterTrench");
+    const lobbyView = document.getElementById("lobbyView");
+    const tradingView = document.getElementById("tradingView");
+    const lobbySymbolSelect = document.getElementById("lobbySymbolSelect");
+    const mainSymbolSelect = document.getElementById("symbolSelect");
+    if (lobbySymbolSelect && mainSymbolSelect) {
+        // Clonar todas las opciones del selector principal al del lobby para que no falte ninguna
+        lobbySymbolSelect.innerHTML = mainSymbolSelect.innerHTML;
+        // Restaurar las clases para que se vea bien en el lobby
+        Array.from(lobbySymbolSelect.options).forEach(opt => {
+            if (!opt.disabled) opt.className = "bg-gray-900 text-white";
+        });
+    }
+
+    
+    if (btnLobbyPremarket) {
+        btnLobbyPremarket.addEventListener("click", async () => {
+            btnLobbyPremarket.innerHTML = '<span class="animate-spin">🔄</span> Consultando al Cerebro...';
+            btnLobbyPremarket.disabled = true;
+            lobbyReportBox.classList.remove("hidden");
+            lobbyReportBox.innerHTML = '<span class="text-yellow-400">Generando resumen del fin de semana (puede tomar hasta 2 minutos con Ollama local)...</span>';
+            
+            try {
+                // By default try to use the engine selected, if not default to ollama
+                const engine = document.getElementById("aiEngineSelect") ? document.getElementById("aiEngineSelect").value : "ollama";
+                const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`);
+                const data = await res.json();
+                
+                if (data.status === "error") {
+                    lobbyReportBox.innerHTML = `<span class="text-red-400">Error: ${data.message}</span>`;
+                } else if (data.status === "idle") {
+                    lobbyReportBox.innerHTML = `<span class="text-gray-400">${data.message}</span>`;
+                } else {
+                    let html = `<p class="font-bold text-white text-base mb-2">Resumen General:</p>
+                                <p class="mb-4 text-green-300">${data.resumen_general}</p>
+                                <p class="font-bold text-white text-base mb-2">Análisis por Activo:</p><ul class="space-y-2">`;
+                    if (data.activos) {
+                        data.activos.forEach(a => {
+                            const color = a.consenso_direccional === "ALCISTA" ? "text-green-400" : (a.consenso_direccional === "BAJISTA" || a.consenso_direccional === "PELIGRO" ? "text-red-400" : "text-yellow-400");
+                            html += `<li class="bg-gray-800 p-2 rounded border border-gray-700">
+                                <span class="font-bold text-white">${a.simbolo}</span> - <span class="${color} font-bold">${a.consenso_direccional}</span><br>
+                                <span class="text-gray-400 text-xs">${a.razonamiento}</span>
+                            </li>`;
+                        });
+                    }
+                    html += `</ul>`;
+                    lobbyReportBox.innerHTML = html;
+                }
+            } catch (e) {
+                lobbyReportBox.innerHTML = `<span class="text-red-400">Fallo de red: ${e.message}</span>`;
+            }
+            
+            btnLobbyPremarket.innerHTML = '✅ Reporte Generado';
+            setTimeout(() => {
+                btnLobbyPremarket.innerHTML = '<span class="animate-pulse">🧠</span> Generar Consenso del Cerebro';
+                btnLobbyPremarket.disabled = false;
+            }, 5000);
+        });
+    }
+
+    if (btnEnterTrench) {
+        btnEnterTrench.addEventListener("click", () => {
+            // Sincronizar el selector del lobby con el selector principal
+            const chosenSymbol = lobbySymbolSelect.value;
+            if (mainSymbolSelect) {
+                mainSymbolSelect.value = chosenSymbol;
+                // Disparar evento de cambio para que la app reaccione
+                mainSymbolSelect.dispatchEvent(new Event('change'));
+            }
+            
+            // Inyectar el consenso pre-market en la Caja de Mando para el Orquestador
+            const macroInput = document.getElementById('macroContext');
+            if (macroInput && window.premarketData && window.premarketData.activos) {
+                const assetData = window.premarketData.activos.find(a => a.simbolo === chosenSymbol || chosenSymbol.includes(a.simbolo));
+                if (assetData) {
+                    macroInput.value = `Sesgo Pre-Market [${assetData.consenso_direccional}]: ${assetData.razonamiento}`;
+                } else {
+                    macroInput.value = `Sesgo Pre-Market General: ${window.premarketData.resumen_general}`;
+                }
+            }
+            
+            // Ocultar lobby, mostrar trading
+            lobbyView.classList.add("hidden");
+            tradingView.classList.remove("hidden");
+            
+            // Forzar resize del gráfico para que ocupe el espacio correcto que estaba hidden
+            window.dispatchEvent(new Event('resize'));
+            
+            // Opcional: auto-iniciar agente
+            // document.getElementById('agentToggle').click();
+            logToTerminal(`🚀 Sistema desplegado en la Trinchera. Mercado seleccionado: ${chosenSymbol}`, "system");
+        });
+    }
 });

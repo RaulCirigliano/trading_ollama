@@ -115,9 +115,31 @@ def get_macro_radar(engine: str = "ollama"):
     Busca noticias globales y detecta oportunidades/riesgos de mercado.
     """
     try:
+
         import requests
         import feedparser
         import json
+        from backend.radar_inbox import RadarInbox, OpportunityCard
+        import uuid
+        from datetime import datetime
+        
+        def save_to_inbox(signals):
+            try:
+                inbox = RadarInbox()
+                for s in signals:
+                    card = OpportunityCard(
+                        id=str(uuid.uuid4()),
+                        timestamp=datetime.now().isoformat(),
+                        activo=s.get("asset", "GENERAL"),
+                        titular=s.get("reason", "Sin titular"),
+                        impacto=s.get("type", "NEUTRAL"),
+                        confianza=s.get("confidence", 50),
+                        justificacion=s.get("reason", "")
+                    )
+                    inbox.add_card(card)
+            except Exception as e:
+                print("Error guardando en buzón:", e)
+
         
         # 1. Extraer titulares generales (Google News Economía/Mercados)
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
@@ -165,7 +187,9 @@ def get_macro_radar(engine: str = "ollama"):
             llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.3)
             response = llm.invoke(prompt)
             txt = response.content.replace("```json", "").replace("```", "").strip()
-            return json.loads(txt)
+            parsed_res = json.loads(txt)
+            save_to_inbox(parsed_res)
+            return parsed_res
             
         else: # ollama, deepseek, local (por defecto usa ollama)
             # FIX: Nunca usar DeepSeek para el radar de noticias porque bloquea la cola de Ollama durante 10 minutos
@@ -185,13 +209,17 @@ def get_macro_radar(engine: str = "ollama"):
                     parsed = json.loads(resp_json)
                     
                     # Llama3 a veces responde con {"signals": [...]} en lugar de [...]
+                    final_res = parsed
                     if isinstance(parsed, dict):
                         for k, v in parsed.items():
                             if isinstance(v, list):
-                                return v
-                        return [parsed] # Si no encontró una lista, envuelve el objeto en una lista
-                        
-                    return parsed
+                                final_res = v
+                                break
+                        if isinstance(final_res, dict): # Aún es dict, no halló lista
+                            final_res = [parsed] 
+                    
+                    save_to_inbox(final_res)
+                    return final_res
                 except:
                     return [{"asset": "JSON_ERR", "type": "Peligro", "confidence": 0, "reason": "Error en formato de respuesta de Ollama", "schedule": "-"}]
             else:
@@ -199,6 +227,21 @@ def get_macro_radar(engine: str = "ollama"):
             
     except Exception as e:
         return [{"asset": "SYS_ERR", "type": "Peligro", "confidence": 0, "reason": str(e), "schedule": "-"}]
+
+
+from backend.premarket_digest import run_premarket_digest
+
+@app.get("/api/macro/premarket")
+def get_premarket_digest(engine: str = "gemini"):
+    """
+    Despierta al Cerebro Principal para que lea el Buzón de Tarjetas
+    generadas por el Agente de Inversiones durante el fin de semana.
+    """
+    try:
+        resultado = run_premarket_digest(engine=engine)
+        return resultado
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.get("/api/market/sentiment")
 def get_sentiment(symbol: str = "BTC/USDT", source: str = "coindesk"):

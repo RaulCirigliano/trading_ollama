@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 historial_trades.csv
 scripts_antiguos/
+buzon_radar.json
