@@ -128,8 +128,8 @@ let currentSymbol = symbolSelect.value;
 let currentPrice = 0;
 
 // Variables de Simulación (Paper Trading) persistentes en el navegador
-let portfolio = JSON.parse(localStorage.getItem('ai_portfolio_v3')) || {
-    VAULT: 1000.00, // Capital total en la Bóveda del Broker (USD)
+let portfolio = JSON.parse(localStorage.getItem('ai_portfolio_v5')) || {
+    VAULT: 500.00, // Capital total en la Bóveda del Broker (USD)
     balances: {
         USDT: 0.00, // Cripto vacía por defecto
         USD: 0.00,  // Wall Street vacía por defecto
@@ -155,16 +155,16 @@ if (typeof portfolio.balances.ARS !== 'number' || isNaN(portfolio.balances.ARS))
 if (typeof portfolio.deposits.USDT !== 'number' || isNaN(portfolio.deposits.USDT)) portfolio.deposits.USDT = 0;
 if (typeof portfolio.deposits.USD !== 'number' || isNaN(portfolio.deposits.USD)) portfolio.deposits.USD = 0;
 if (typeof portfolio.deposits.ARS !== 'number' || isNaN(portfolio.deposits.ARS)) portfolio.deposits.ARS = 0;
-if (typeof portfolio.VAULT !== 'number' || isNaN(portfolio.VAULT)) portfolio.VAULT = 1000.00;
+if (typeof portfolio.VAULT !== 'number' || isNaN(portfolio.VAULT)) portfolio.VAULT = 500.00;
 if (typeof portfolio.ASSET !== 'number' || isNaN(portfolio.ASSET)) portfolio.ASSET = 0;
 if (typeof portfolio.entryPrice !== 'number' || isNaN(portfolio.entryPrice)) portfolio.entryPrice = 0;
 
-let tradeHistoryLog = JSON.parse(localStorage.getItem('ai_trade_history')) || [];
+let tradeHistoryLog = JSON.parse(localStorage.getItem('ai_trade_history_v2')) || [];
 if (!Array.isArray(tradeHistoryLog)) tradeHistoryLog = [];
 
 // Función de reseteo para limpiar la memoria si el usuario quiere empezar de cero
 window.resetearCuenta = function() {
-    localStorage.removeItem('ai_portfolio_v3');
+    localStorage.removeItem('ai_portfolio_v5');
     // No borramos 'ai_trade_history' para que el registro histórico sea eterno
     location.reload();
 };
@@ -183,28 +183,34 @@ function updateCapitalDisplay() {
     
     // Actualizar Billeteras en UI
     const vaultDisplay = document.getElementById('vaultDisplay');
-    if (vaultDisplay) vaultDisplay.innerText = `$${portfolio.VAULT.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    if (vaultDisplay) vaultDisplay.innerText = `USD ${portfolio.VAULT.toFixed(2)}`;
     
     const usdtDisp = document.getElementById('walletUsdtDisplay');
-    if (usdtDisp) usdtDisp.innerText = `$${portfolio.balances.USDT.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    if (usdtDisp) usdtDisp.innerText = `${portfolio.balances.USDT.toFixed(2)} USDT`;
     
     const usdDisp = document.getElementById('walletUsdDisplay');
-    if (usdDisp) usdDisp.innerText = `$${portfolio.balances.USD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    if (usdDisp) usdDisp.innerText = `USD ${portfolio.balances.USD.toFixed(2)}`;
     
     const arsDisp = document.getElementById('walletArsDisplay');
-    if (arsDisp) arsDisp.innerText = `$${portfolio.balances.ARS.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    if (arsDisp) arsDisp.innerText = `$${portfolio.balances.ARS.toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ARS`;
     
-    // Calcular Rendimiento Total (PnlD) basado solo en el capital activo del bot
+    // Calcular Rendimiento Total (PnlD) basado exclusivamente en el capital fondeado a la billetera activa
     const pnlDisplay = document.getElementById('pnlDisplay');
     if (pnlDisplay) {
-        const diff = total - 100.00;
-        const percent = (diff / 100.00) * 100;
+        const base = (portfolio.deposits && portfolio.deposits[currency] > 0) ? portfolio.deposits[currency] : 0;
         
-        const sign = diff >= 0 ? '+' : '';
-        const color = diff >= 0 ? (diff > 0 ? 'text-green-400' : 'text-gray-400') : 'text-red-400';
-        
-        pnlDisplay.className = `font-bold ${color}`;
-        pnlDisplay.innerText = `${sign}$${Math.abs(diff).toFixed(2)} (${sign}${percent.toFixed(2)}%)`;
+        if (base === 0) {
+            pnlDisplay.className = 'font-bold text-gray-400';
+            pnlDisplay.innerText = '$0.00 (0.00%)';
+        } else {
+            const diff = total - base;
+            const percent = (diff / base) * 100;
+            const sign = diff >= 0 ? '+' : '';
+            const color = diff >= 0 ? (diff > 0 ? 'text-green-400' : 'text-gray-400') : 'text-red-400';
+            
+            pnlDisplay.className = `font-bold ${color}`;
+            pnlDisplay.innerText = `${sign}${currency === 'ARS' ? '$' : ''}${Math.abs(diff).toFixed(2)} ${currency} (${sign}${percent.toFixed(2)}%)`;
+        }
     }
 
     // Actualizar Tabla de Posiciones Activas
@@ -286,7 +292,7 @@ window.ejecutarTransferencia = function() {
     portfolio.balances[destWallet] += amount;
     portfolio.deposits[destWallet] += amount; // Registrar la base para calcular ganancias limpias
     
-    localStorage.setItem('ai_portfolio_v3', JSON.stringify(portfolio));
+    localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     updateCapitalDisplay();
     document.getElementById('tesoreriaModal').classList.add('hidden');
     document.getElementById('tesoreriaAmount').value = '';
@@ -317,7 +323,7 @@ window.sweepBackAll = function() {
     portfolio.balances.USDT = 0;
     portfolio.balances.ARS = 0;
     
-    localStorage.setItem('ai_portfolio_v3', JSON.stringify(portfolio));
+    localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     updateCapitalDisplay();
     document.getElementById('tesoreriaModal').classList.add('hidden');
     
@@ -722,7 +728,7 @@ function addTradeToHistory(signal, baseCoin, price, status, mode) {
     tradeHistoryLog.unshift({ timeString, timestamp, signal, baseCoin, price, status, mode });
     
     // Guardar en persistencia local (navegador)
-    localStorage.setItem('ai_trade_history', JSON.stringify(tradeHistoryLog));
+    localStorage.setItem('ai_trade_history_v2', JSON.stringify(tradeHistoryLog));
     
     // Guardar en archivo persistente (backend CSV)
     fetch(`${API_BASE_URL}/api/log_trade`, {
@@ -789,7 +795,7 @@ function executeTrade(signal, baseCoin, price, mode = 'Automático') {
     }
     
     // Guardar en el navegador (Persistencia)
-    localStorage.setItem('ai_portfolio_v3', JSON.stringify(portfolio));
+    localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     
     updateCapitalDisplay();
     addTradeToHistory(signal, baseCoin, price, 'Ejecutada', mode);
@@ -850,7 +856,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Funciones interactivas de la Bóveda
 window.inyectarCapital = function(amount) {
     portfolio.balances[getCurrency(currentSymbol)] += amount;
-    localStorage.setItem('ai_portfolio_v3', JSON.stringify(portfolio));
+    localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     logToTerminal(`💸 DEPÓSITO: Se han inyectado $${amount} de liquidez al Agente.`, 'action');
     updateCapitalDisplay();
 };
@@ -1068,34 +1074,41 @@ function generarResumen() {
     
     const winRate = totalTrades > 0 ? ((winTrades / totalTrades) * 100).toFixed(2) : 0;
     
-    // Calcular Capitales (Global)
-    const capInicial = parseFloat(document.getElementById('resumenInitialCap').value) || 100000;
+    // Calcular Capitales con MATEMÁTICA PURA basada en operaciones reales
     const currency = getCurrency(currentSymbol) || 'USDT';
     
-    // Dinero Final = Saldo en Bóveda + (Cantidad de Activo * Precio Actual)
+    // Dinero actual en cuenta (Bóveda + Billetera Operativa + Posición abierta)
     let asstValue = 0;
     if (portfolio.ASSET && portfolio.ASSET > 0) {
         asstValue = portfolio.ASSET * currentPrice;
     }
-    const capFinal = (portfolio.balances && portfolio.balances[currency] !== undefined) 
-                        ? portfolio.balances[currency] + asstValue 
-                        : (portfolio[currency] || 0) + asstValue;
-                        
-    const resultadoNeto = capFinal - capInicial;
+    // El bot y el Resumen se enfocan EXCLUSIVAMENTE en la Billetera Operativa Activa (Aislamiento de Fondos)
+    const saldoOperativoActual = (portfolio.balances && portfolio.balances[currency] !== undefined)
+                                    ? portfolio.balances[currency] + asstValue
+                                    : (portfolio[currency] || 0) + asstValue;
+    
+    // El Resultado Neto real es la suma matemática de los trades de la billetera activa
+    const resultadoNeto = totalPnl;
+    
+    // Capital Inicial y Final de la Billetera Operativa (la Bóveda queda completamente aislada)
+    const capInicial = saldoOperativoActual - resultadoNeto;
+    const capFinal = saldoOperativoActual;
+    
     const rentabilidadGlobal = capInicial > 0 ? ((resultadoNeto / capInicial) * 100).toFixed(2) : 0;
     
     // Actualizar UI
     document.getElementById('resumenStats').classList.remove('hidden');
     
-    // Stats Nuevos
-    document.getElementById('resDineroInicial').innerText = `$${capInicial.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
-    document.getElementById('resDineroFinal').innerText = `$${capFinal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+    // Stats Nuevos con Moneda Real de la Billetera Operada
+    const prefix = (currency === 'ARS') ? '$' : '';
+    document.getElementById('resDineroInicial').innerText = `${prefix}${capInicial.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} ${currency}`;
+    document.getElementById('resDineroFinal').innerText = `${prefix}${capFinal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} ${currency}`;
     
     const sign = resultadoNeto >= 0 ? '+' : '';
     const colorPnl = resultadoNeto >= 0 ? (resultadoNeto > 0 ? 'text-green-400' : 'text-gray-400') : 'text-red-400';
     
     const elResultado = document.getElementById('resResultadoNeto');
-    elResultado.innerText = `${sign}$${Math.abs(resultadoNeto).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+    elResultado.innerText = `${sign}${prefix}${Math.abs(resultadoNeto).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} ${currency}`;
     elResultado.className = `text-xl font-bold ${colorPnl}`;
     
     const elPorcentaje = document.getElementById('resPorcentaje');
