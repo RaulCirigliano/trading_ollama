@@ -3,6 +3,17 @@ const API_BASE_URL = 'http://127.0.0.1:18767';
 const terminal = document.getElementById('terminal');
 const agentToggle = document.getElementById('agentToggle');
 
+// Función de sanitización anti-XSS para contenido externo y texto de LLMs
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function logToTerminal(message, type = 'info') {
     if (!terminal) return;
     const time = new Date().toLocaleTimeString();
@@ -13,7 +24,11 @@ function logToTerminal(message, type = 'info') {
     if (type === 'action') color = 'text-blue-400';
     
     p.className = color;
-    p.innerHTML = `<span class="text-gray-500">[${time}]</span> > ${message}`;
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'text-gray-500';
+    timeSpan.textContent = `[${time}] > `;
+    p.appendChild(timeSpan);
+    p.appendChild(document.createTextNode(String(message)));
     terminal.appendChild(p);
     terminal.scrollTop = terminal.scrollHeight;
 }
@@ -101,30 +116,30 @@ chart.subscribeCrosshairMove((param) => {
 
     const candleData = param.seriesData.get(candleSeries);
     if (candleData && candleData.close !== undefined) {
-        legendOhlc.innerHTML = `Ape: ${candleData.open.toFixed(2)} | Máx: ${candleData.high.toFixed(2)} | Mín: ${candleData.low.toFixed(2)} | Cierre: ${candleData.close.toFixed(2)}`;
+        legendOhlc.textContent = `Ape: ${candleData.open.toFixed(2)} | Máx: ${candleData.high.toFixed(2)} | Mín: ${candleData.low.toFixed(2)} | Cierre: ${candleData.close.toFixed(2)}`;
         let color = candleData.close >= candleData.open ? 'text-green-400' : 'text-red-400';
         legendOhlc.className = color;
     }
     
     const smaData = param.seriesData.get(smaSeries);
     if (smaData && smaData.value !== undefined) {
-        legendSma.innerHTML = `SMA 20: ${smaData.value.toFixed(2)}`;
+        legendSma.textContent = `SMA 20: ${smaData.value.toFixed(2)}`;
     }
     
     const vwapData = param.seriesData.get(vwapSeries);
     if (vwapData && vwapData.value !== undefined) {
-        legendVwap.innerHTML = `VWAP: ${vwapData.value.toFixed(2)}`;
+        legendVwap.textContent = `VWAP: ${vwapData.value.toFixed(2)}`;
     }
     
     const vwapUpperData = param.seriesData.get(vwapUpperSeries);
     const vwapLowerData = param.seriesData.get(vwapLowerSeries);
     if (vwapUpperData && vwapLowerData && vwapUpperData.value !== undefined && vwapLowerData.value !== undefined) {
-        if(legendVwapBands) legendVwapBands.innerHTML = `Bandas: ${vwapUpperData.value.toFixed(2)} / ${vwapLowerData.value.toFixed(2)}`;
+        if(legendVwapBands) legendVwapBands.textContent = `Bandas: ${vwapUpperData.value.toFixed(2)} / ${vwapLowerData.value.toFixed(2)}`;
     }
 });
 
 const symbolSelect = document.getElementById('symbolSelect');
-let currentSymbol = symbolSelect.value;
+let currentSymbol = symbolSelect ? symbolSelect.value : 'BTC/USDT';
 let currentPrice = 0;
 
 // Variables de Simulación (Paper Trading) persistentes en el navegador
@@ -146,6 +161,18 @@ function getCurrency(symbol) {
     return 'USD';
 }
 
+// Helpers de Única Fuente de Verdad para la Posición (Bloque 1)
+function getOpenPosition() {
+    if (portfolio.position && typeof portfolio.position.qty === 'number' && portfolio.position.qty > 0.0001) {
+        return portfolio.position;
+    }
+    return null;
+}
+
+function hasOpenPosition() {
+    return !!getOpenPosition();
+}
+
 // Mecanismo de Cordura (Sanity Check) para evitar Save Corruption
 if (!portfolio.balances) portfolio.balances = { USDT: 0, USD: 0, ARS: 0 };
 if (!portfolio.deposits) portfolio.deposits = { USDT: 0, USD: 0, ARS: 0 };
@@ -159,6 +186,143 @@ if (typeof portfolio.VAULT !== 'number' || isNaN(portfolio.VAULT)) portfolio.VAU
 if (typeof portfolio.ASSET !== 'number' || isNaN(portfolio.ASSET)) portfolio.ASSET = 0;
 if (typeof portfolio.entryPrice !== 'number' || isNaN(portfolio.entryPrice)) portfolio.entryPrice = 0;
 if (typeof portfolio.totalFeesPaid !== 'number' || isNaN(portfolio.totalFeesPaid)) portfolio.totalFeesPaid = 0;
+
+// Migración y compatibilidad con el Modelo de Posición Estructurado
+if (!portfolio.position && portfolio.ASSET > 0.0001) {
+    const cur = getCurrency(currentSymbol);
+    portfolio.position = {
+        symbol: currentSymbol,
+        baseCoin: currentSymbol.split('/')[0],
+        currency: cur,
+        qty: portfolio.ASSET,
+        entryPrice: portfolio.entryPrice || 0,
+        costBasis: portfolio.ASSET * (portfolio.entryPrice || 0),
+        tp: 1.5,
+        sl: 1.0,
+        openedAt: new Date().toISOString()
+    };
+}
+
+// Al cargar la página, si existe posición abierta, forzar selector y activo al de la posición (Bloque 1)
+const initialOpenPos = getOpenPosition();
+if (initialOpenPos && initialOpenPos.symbol) {
+    currentSymbol = initialOpenPos.symbol;
+    if (symbolSelect) symbolSelect.value = initialOpenPos.symbol;
+}
+
+// Variables de monitoreo fiable del precio de posición y frescura (Bloque 2)
+window.positionAssetPrice = null;
+window.positionAssetPriceTs = 0;
+let posPriceInFlight = false;
+let riskFeedFailures = 0;
+let lastStaleWarningTs = 0;
+let lastTrailingLogTs = 0;
+let lastPortfolioSaveTs = 0;
+
+async function refreshPositionPrice() {
+    const pos = getOpenPosition();
+    if (!pos || posPriceInFlight) return;
+    if (pos.symbol === currentSymbol) {
+        window.positionAssetPrice = currentPrice;
+        window.positionAssetPriceTs = Math.floor(Date.now() / 1000);
+        riskFeedFailures = 0;
+        return;
+    }
+    posPriceInFlight = true;
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/market/price?symbol=${encodeURIComponent(pos.symbol)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data && typeof data.price === 'number' && data.price > 0) {
+            window.positionAssetPrice = data.price;
+            window.positionAssetPriceTs = data.ts || Math.floor(Date.now() / 1000);
+            riskFeedFailures = 0;
+        } else {
+            riskFeedFailures++;
+        }
+    } catch (e) {
+        riskFeedFailures++;
+        if (riskFeedFailures >= 5) {
+            logToTerminal(`🚨 [ALERTA CRÍTICA] Feed de riesgo caído para ${pos.symbol} (${riskFeedFailures} fallos consecutivos). Considera cerrar manualmente la posición.`, 'error');
+        }
+    } finally {
+        posPriceInFlight = false;
+    }
+}
+
+// Consulta periódica cada 5s para precio de posición en segundo plano
+setInterval(() => {
+    const pos = getOpenPosition();
+    if (pos && pos.symbol !== currentSymbol) {
+        refreshPositionPrice();
+    }
+}, 5000);
+
+// --- CIRCUIT BREAKER DIARIO PERSISTIDO (Bloque 4) ---
+function getRiskState() {
+    const today = new Date().toISOString().split('T')[0];
+    let state = null;
+    try {
+        state = JSON.parse(localStorage.getItem('ai_risk_state_v1'));
+    } catch (_) {}
+
+    const cur = getCurrency(currentSymbol);
+    const currentVault = portfolio.VAULT || 500;
+    const currentBal = (portfolio.balances && portfolio.balances[cur]) || 0;
+    const currentCap = currentVault + currentBal;
+
+    if (!state || state.date !== today) {
+        state = {
+            date: today,
+            consecutiveLosses: 0,
+            dailyRealizedPnl: 0,
+            startOfDayCapital: currentCap > 0 ? currentCap : 500,
+            haltedUntil: null
+        };
+        localStorage.setItem('ai_risk_state_v1', JSON.stringify(state));
+    }
+    return state;
+}
+
+function saveRiskState(state) {
+    try {
+        localStorage.setItem('ai_risk_state_v1', JSON.stringify(state));
+    } catch (_) {}
+}
+
+function recordTradeInCircuitBreaker(pnlNeto) {
+    const state = getRiskState();
+    state.dailyRealizedPnl = (state.dailyRealizedPnl || 0) + pnlNeto;
+    if (pnlNeto < 0) {
+        state.consecutiveLosses = (state.consecutiveLosses || 0) + 1;
+    } else if (pnlNeto > 0) {
+        state.consecutiveLosses = 0;
+    }
+
+    // 1. Regla 3 pérdidas consecutivas
+    if (state.consecutiveLosses >= 3) {
+        state.haltedUntil = Date.now() + 24 * 60 * 60 * 1000;
+        logToTerminal(`🛑 [CIRCUIT BREAKER] 3 pérdidas consecutivas detectadas. Trading pausado 24h para proteger capital.`, 'error');
+    }
+
+    // 2. Regla Drawdown diario > 3%
+    const baseCap = state.startOfDayCapital || 500;
+    if (state.dailyRealizedPnl < 0 && (Math.abs(state.dailyRealizedPnl) / baseCap) >= 0.03) {
+        state.haltedUntil = Date.now() + 24 * 60 * 60 * 1000;
+        logToTerminal(`🛑 [CIRCUIT BREAKER] Drawdown diario del 3% alcanzado ($${Math.abs(state.dailyRealizedPnl).toFixed(2)} pérdida vs base $${baseCap.toFixed(2)}). Trading pausado 24h.`, 'error');
+    }
+
+    saveRiskState(state);
+}
+
+window.resetCircuitBreaker = function() {
+    const state = getRiskState();
+    state.consecutiveLosses = 0;
+    state.dailyRealizedPnl = 0;
+    state.haltedUntil = null;
+    saveRiskState(state);
+    logToTerminal(`🔄 [CIRCUIT BREAKER] Reset manual aplicado por el operador. Límites restaurados.`, 'action');
+};
 
 function getBrokerFeeRate() {
     const feeSelect = document.getElementById('brokerFeeSelect');
@@ -182,6 +346,21 @@ function updateBrokerFeeDisplay() {
 let tradeHistoryLog = JSON.parse(localStorage.getItem('ai_trade_history_v2')) || [];
 if (!Array.isArray(tradeHistoryLog)) tradeHistoryLog = [];
 
+// --- GESTIÓN DE SESIONES OPERATIVAS ---
+// Permite distinguir visualmente las operaciones realizadas antes y después de suspender el agente
+let currentSessionId = parseInt(localStorage.getItem('ai_current_session_id') || '1');
+if (isNaN(currentSessionId) || currentSessionId < 1) currentSessionId = 1;
+
+// Sincronizar sessionId con el máximo registrado en el log histórico
+const maxSessionInLog = tradeHistoryLog.reduce((max, t) => Math.max(max, t.sessionId || 1), 1);
+if (currentSessionId < maxSessionInLog) {
+    currentSessionId = maxSessionInLog;
+}
+
+// Banderas para detectar cuando el agente fue suspendido y se reanuda
+let agentWasSuspended = tradeHistoryLog.length > 0;
+let isCopilotApprovalPause = false;
+
 // Función de reseteo para limpiar la memoria si el usuario quiere empezar de cero
 window.resetearCuenta = function() {
     localStorage.removeItem('ai_portfolio_v5');
@@ -191,7 +370,19 @@ window.resetearCuenta = function() {
 
 function updateCapitalDisplay() {
     let currency = getCurrency(currentSymbol);
-    let total = portfolio.balances[currency] + (portfolio.ASSET * currentPrice);
+    
+    // Calcular valor de posición activa sin mezclar activos (Bloque 1)
+    let posValue = 0;
+    const pos = getOpenPosition();
+    if (pos) {
+        const isSameSymbol = (pos.symbol === currentSymbol);
+        const evalPrice = isSameSymbol ? currentPrice : (window.positionAssetPrice || pos.entryPrice);
+        if (pos.currency === currency) {
+            posValue = pos.qty * evalPrice;
+        }
+    }
+
+    let total = portfolio.balances[currency] + posValue;
     
     const currencySymbols = { 'USDT': 'USDT', 'USD': 'USD', 'ARS': 'ARS' };
     const curSym = currencySymbols[currency] || '$';
@@ -242,13 +433,16 @@ function updateCapitalDisplay() {
     // Actualizar Tabla de Posiciones Activas
     const activeBody = document.getElementById('activePositionsBody');
     if (activeBody) {
-        if (portfolio.ASSET <= 0.0001) {
+        const currentPos = getOpenPosition();
+        if (!currentPos) {
             if (!document.getElementById('emptyPositionsRow')) {
-                activeBody.innerHTML = `<tr id="emptyPositionsRow"><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No tienes posiciones activas (100% liquidez en USDT).</td></tr>`;
+                activeBody.innerHTML = `<tr id="emptyPositionsRow"><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No tienes posiciones activas (100% liquidez en ${currency}).</td></tr>`;
             }
         } else {
-            const baseCoin = currentSymbol.split('/')[0];
-            const pnlNoRealizado = (currentPrice - portfolio.entryPrice) * portfolio.ASSET;
+            const isSameSymbol = (currentPos.symbol === currentSymbol);
+            const activePrice = isSameSymbol ? currentPrice : (window.positionAssetPrice || currentPos.entryPrice);
+            const pnlNoRealizado = (activePrice - currentPos.entryPrice) * currentPos.qty;
+            const pnlPct = currentPos.entryPrice > 0 ? ((activePrice - currentPos.entryPrice) / currentPos.entryPrice) * 100 : 0;
             const pnlSign = pnlNoRealizado >= 0 ? '+' : '';
             const pnlColor = pnlNoRealizado >= 0 ? 'text-green-400' : 'text-red-400';
             
@@ -267,14 +461,17 @@ function updateCapitalDisplay() {
                     </tr>
                 `;
             }
-            document.getElementById('apCoin').innerText = baseCoin;
-            document.getElementById('apAmount').innerText = portfolio.ASSET.toFixed(6);
-            document.getElementById('apEntry').innerText = `$${portfolio.entryPrice.toLocaleString()}`;
-            document.getElementById('apCurrent').innerText = `$${currentPrice.toLocaleString()}`;
+            const symbolIndicator = isSameSymbol 
+                ? `<span class="font-bold text-white">${escapeHtml(currentPos.baseCoin)}</span> <span class="text-[10px] text-gray-400">(${escapeHtml(currentPos.symbol)})</span>`
+                : `<span class="font-bold text-white">${escapeHtml(currentPos.baseCoin)}</span> <span class="text-[10px] text-yellow-400 bg-yellow-950/60 px-1.5 py-0.5 rounded border border-yellow-700/50">Segundo plano: ${escapeHtml(currentPos.symbol)}</span>`;
+            document.getElementById('apCoin').innerHTML = symbolIndicator;
+            document.getElementById('apAmount').innerText = currentPos.qty.toFixed(6);
+            document.getElementById('apEntry').innerText = `$${currentPos.entryPrice.toLocaleString()}`;
+            document.getElementById('apCurrent').innerText = `$${activePrice.toLocaleString()}`;
             
             const pnlCell = document.getElementById('apPnl');
             pnlCell.className = `px-4 py-2 font-bold ${pnlColor}`;
-            pnlCell.innerText = `${pnlSign}$${Math.abs(pnlNoRealizado).toFixed(2)}`;
+            pnlCell.innerText = `${pnlSign}$${Math.abs(pnlNoRealizado).toFixed(2)} (${pnlSign}${pnlPct.toFixed(2)}%)`;
         }
     }
 }
@@ -282,6 +479,13 @@ function updateCapitalDisplay() {
 symbolSelect.addEventListener('change', () => {
     currentSymbol = symbolSelect.value;
     logToTerminal(`Cambiando activo a ${currentSymbol}...`, 'warn');
+    
+    // Si hay una posición abierta en otro activo, alertar y precargar su precio para el SL/TP de fondo
+    const pos = getOpenPosition();
+    if (pos && pos.symbol !== currentSymbol) {
+        logToTerminal(`ℹ️ Posición activa en ${pos.symbol}. El Agente de Riesgo continúa monitoreando tu posición de fondo mientras visualizas ${currentSymbol}.`, 'info');
+        refreshPositionPrice();
+    }
     
     // Auto-ajustar sugerencia de broker fee según activo (si no está en modo personalizado)
     const feeSelect = document.getElementById('brokerFeeSelect');
@@ -341,7 +545,7 @@ window.ejecutarTransferencia = function() {
 };
 
 window.sweepBackAll = function() {
-    if (portfolio.ASSET > 0) {
+    if (hasOpenPosition()) {
         alert("No puedes vaciar la billetera mientras tengas posiciones abiertas. Cierra la operación primero.");
         return;
     }
@@ -360,8 +564,6 @@ window.sweepBackAll = function() {
     portfolio.deposits.USD = 0;
     portfolio.deposits.USDT = 0;
     portfolio.deposits.ARS = 0;
-    portfolio.balances.USDT = 0;
-    portfolio.balances.ARS = 0;
     
     localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     updateCapitalDisplay();
@@ -370,16 +572,18 @@ window.sweepBackAll = function() {
     logToTerminal(`🧹 SWEEP-BACK: Todas las billeteras operativas vaciadas. Capital devuelto a la Bóveda.`, 'action');
 };
 
-// Obtener datos reales del motor Python
+// Obtener datos reales del motor Python (con protección contra respuestas tardías)
 async function fetchMarketData() {
+    const reqSymbol = currentSymbol;
     try {
-        logToTerminal(`Conectando al motor Python para obtener velas de ${currentSymbol}...`, 'info');
-        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
+        logToTerminal(`Conectando al motor Python para obtener velas de ${reqSymbol}...`, 'info');
+        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${encodeURIComponent(reqSymbol)}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
         const data = await response.json();
+        if (reqSymbol !== currentSymbol) return; // Descartar si el usuario cambió de símbolo durante la petición
+        
         if (data && !data.error) {
-            
             try {
                 const cleanCandleData = data.map(d => ({time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}));
                 candleSeries.setData(cleanCandleData);
@@ -404,7 +608,7 @@ async function fetchMarketData() {
             updateCapitalDisplay();
             logToTerminal('Gráfico actualizado con datos reales.', 'action');
         } else {
-            logToTerminal('Error de datos: ' + data.error, 'error');
+            logToTerminal('Error de datos: ' + (data?.error || 'Sin datos'), 'error');
         }
     } catch (error) {
         logToTerminal(`Fallo al conectar con FastAPI: ${error.message}`, 'error');
@@ -421,6 +625,17 @@ window.addEventListener('resize', () => {
 // Ciclo de IA (Cada 15 segundos)
 let isAgentActive = false;
 let simulateInterval;
+let cycleInFlight = false; // Mutex para evitar análisis concurrentes en vuelo
+let isExecutingTrade = false; // Mutex para evitar ejecuciones concurrentes de órdenes
+
+let copilotExpiryTimer = null;
+
+function scheduleNext(delayMs) {
+    if (simulateInterval) clearTimeout(simulateInterval);
+    if (isAgentActive) {
+        simulateInterval = setTimeout(ejecutarAnalisis, delayMs);
+    }
+}
 
 agentToggle.addEventListener('click', () => {
     isAgentActive = !isAgentActive;
@@ -428,121 +643,216 @@ agentToggle.addEventListener('click', () => {
         agentToggle.innerText = 'Detener Agente (Kill Switch)';
         agentToggle.classList.replace('bg-blue-600', 'bg-red-600');
         agentToggle.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
+
+        // Si el agente estuvo suspendido y ya hay trades registrados en la sesión actual, avanzar a una nueva sesión
+        if (agentWasSuspended && !isCopilotApprovalPause) {
+            const hasTradesInCurrentSession = tradeHistoryLog.some(t => (t.sessionId || 1) === currentSessionId);
+            if (hasTradesInCurrentSession) {
+                currentSessionId += 1;
+                localStorage.setItem('ai_current_session_id', currentSessionId.toString());
+                logToTerminal(`🔄 Reanudando agente: Nueva sesión iniciada (#${currentSessionId}). Operaciones previas diferenciadas.`, 'info');
+            }
+            agentWasSuspended = false;
+            renderTradeHistory();
+        }
+        isCopilotApprovalPause = false;
+
         logToTerminal('Agente activado. Iniciando análisis cuantitativo.', 'info');
         
-        const ejecutarAnalisis = async () => {
-            if (!isAgentActive) return;
-
-            // Verificar si estamos dentro del horario de operación
-            const scheduleMode = document.getElementById('scheduleModeSelect')?.value || 'libre';
-            if (scheduleMode === 'custom') {
-                const startTime = document.getElementById('timeStart').value;
-                const endTime = document.getElementById('timeEnd').value;
-                const now = new Date();
-                const currentMinutes = now.getHours() * 60 + now.getMinutes();
-                
-                const [startH, startM] = startTime.split(':').map(Number);
-                const [endH, endM] = endTime.split(':').map(Number);
-                const startMinutes = startH * 60 + startM;
-                const endMinutes = endH * 60 + endM;
-
-                let isDentroDeHorario = false;
-                if (startMinutes <= endMinutes) {
-                    isDentroDeHorario = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
-                } else {
-                    isDentroDeHorario = currentMinutes >= startMinutes || currentMinutes <= endMinutes;
-                }
-
-                if (!isDentroDeHorario) {
-                    logToTerminal(`⏳ Fuera de horario operativo (${startTime} - ${endTime}). Análisis pausado...`, 'warn');
-                    simulateInterval = setTimeout(ejecutarAnalisis, 60000);
-                    return;
-                }
-            }
-
-            const engine = document.getElementById('engineSelect')?.value || 'local';
-            logToTerminal(`Consultando Orquestador (${currentSymbol}) vía ${engine.toUpperCase()}...`, 'info');
-            try {
-                const tpSlVal = document.getElementById('tpSlSelect')?.value || "3.0|-2.0";
-                const [tpStr, slStr] = tpSlVal.split('|');
-                const riskVal = document.getElementById('riskSelect')?.value || "0.25";
-                
-                const macroContextText = document.getElementById('macroContext')?.value || '';
-                const sentScore = window.currentSentimentScore || 0;
-                const feeRate = getBrokerFeeRate();
-                const url = `${API_BASE_URL}/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}&fee=${feeRate}`;
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                if (data && !data.error) {
-                    let logType = 'info';
-                    if (data.signal === 'COMPRAR') logType = 'action';
-                    if (data.signal === 'VENDER') logType = 'error';
-                    
-                    const feeStr = data.fee_info ? ` | Fee Broker: ${data.fee_info.round_trip_fee}% ida/vuelta` : '';
-                    const rsiDisp = data.indicators?.rsi !== undefined && data.indicators?.rsi !== null ? data.indicators.rsi : '-';
-                    const smaDisp = data.indicators?.sma_20 !== undefined && data.indicators?.sma_20 !== null ? data.indicators.sma_20 : '-';
-                    logToTerminal(`[${data.signal}] RSI: ${rsiDisp} | SMA20: ${smaDisp}${feeStr}`, 'warn');
-                    logToTerminal(`Razonamiento: ${data.reason}`, logType);
-                    
-                    // Lógica de Paper Trading & Copiloto
-                    const baseCoin = currentSymbol.split('/')[0];
-                    const executionMode = document.getElementById('executionModeSelect')?.value || 'copilot';
-                    
-                    // Permitir que la orden viaje al Ejecutor (ExecuteTrade será el encargado de rechazarla si no hay fondos)
-                    const isBuyable = data.signal === 'COMPRAR';
-                    const isSellable = data.signal === 'VENDER' && portfolio.ASSET > 0.0001;
-                    
-                    if (isBuyable || isSellable) {
-                        if (executionMode === 'auto') {
-                            executeTrade(data.signal, baseCoin, currentPrice);
-                        } else {
-                            // Detener momentáneamente el ciclo para no spamear
-                            isAgentActive = false;
-                            document.getElementById('agentToggle').innerText = 'Activar Agente';
-                            document.getElementById('agentToggle').classList.replace('bg-red-600', 'bg-blue-600');
-                            document.getElementById('agentToggle').classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
-                            showCopilotModal(data.signal, data.reason, baseCoin, currentPrice);
-                        }
-                    }
-                } else {
-                    logToTerminal('Error de análisis: ' + data.error, 'error');
-                }
-            } catch (err) {
-                logToTerminal('Fallo de conexión con el Agente Python.', 'error');
-            }
-
-            // Calcular próximo intervalo basado en temporalidad
-            if (isAgentActive) {
-                const tf = document.getElementById('timeframeSelect')?.value || '1m';
-                let delayMs = 60000; // Por defecto 1 min
-                if (tf === '5m') delayMs = 300000;
-                if (tf === '15m') delayMs = 900000;
-                
-                // Si el motor es local, podemos ir más rápido (ej 10 segs) porque es gratis, pero si es IA respetamos las velas
-                if (engine === 'local') delayMs = 15000;
-
-                simulateInterval = setTimeout(ejecutarAnalisis, delayMs);
-            }
-        };
-
         ejecutarAnalisis(); // Iniciar primer ciclo
     } else {
         agentToggle.innerText = 'Activar Agente';
         agentToggle.classList.replace('bg-red-600', 'bg-blue-600');
         agentToggle.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
+        
         clearTimeout(simulateInterval);
+        if (copilotExpiryTimer) {
+            clearInterval(copilotExpiryTimer);
+            copilotExpiryTimer = null;
+        }
+        if (modal && !modal.classList.contains('hidden')) {
+            modal.classList.add('hidden');
+            pendingTrade = null;
+        }
+
+        if (!isCopilotApprovalPause) {
+            agentWasSuspended = true;
+            renderTradeHistory();
+        }
         logToTerminal('Agente detenido.', 'warn');
     }
 });
 
-// Ciclo de Gráfico en Vivo (Cada 2 segundos) para que se mueva rápido
+const ejecutarAnalisis = async () => {
+    if (!isAgentActive) return;
+
+    // 1. Verificación del Circuit Breaker (Bloque 4)
+    const riskState = getRiskState();
+    if (riskState.haltedUntil && Date.now() < riskState.haltedUntil) {
+        const hoursLeft = ((riskState.haltedUntil - Date.now()) / (1000 * 60 * 60)).toFixed(1);
+        logToTerminal(`🛑 [CIRCUIT BREAKER] Agente en pausa preventiva (${hoursLeft}h restantes). Operación bloqueada.`, 'error');
+        if (isAgentActive) {
+            isAgentActive = false;
+            agentToggle.innerText = 'Activar Agente';
+            agentToggle.classList.replace('bg-red-600', 'bg-blue-600');
+            agentToggle.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
+        }
+        return;
+    }
+
+    // 2. Control de concurrencia y mutex (Bloque 3)
+    if (cycleInFlight) {
+        logToTerminal('⏳ Análisis previo aún en curso. Esperando liberación de recursos...', 'warn');
+        scheduleNext(5000);
+        return;
+    }
+    cycleInFlight = true;
+
+    const engine = document.getElementById('engineSelect')?.value || 'local';
+    try {
+        // Verificar si estamos dentro del horario de operación
+        const scheduleMode = document.getElementById('scheduleModeSelect')?.value || 'libre';
+        if (scheduleMode === 'custom') {
+            const startTime = document.getElementById('timeStart').value;
+            const endTime = document.getElementById('timeEnd').value;
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            
+            const [startH, startM] = startTime.split(':').map(Number);
+            const [endH, endM] = endTime.split(':').map(Number);
+            const startMinutes = startH * 60 + startM;
+            const endMinutes = endH * 60 + endM;
+
+            let isDentroDeHorario = false;
+            if (startMinutes <= endMinutes) {
+                isDentroDeHorario = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+            } else {
+                isDentroDeHorario = currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+            }
+
+            if (!isDentroDeHorario) {
+                logToTerminal(`⏳ Fuera de horario operativo (${startTime} - ${endTime}). Análisis pausado...`, 'warn');
+                cycleInFlight = false;
+                scheduleNext(60000);
+                return;
+            }
+        }
+
+        // 3. Resolución de activo objetivo (Bloque 1 item 8)
+        const openPos = getOpenPosition();
+        const hasPosition = !!openPos;
+        let targetSymbol = currentSymbol;
+        let entryPrice = 0;
+
+        if (openPos) {
+            targetSymbol = openPos.symbol;
+            entryPrice = openPos.entryPrice || 0;
+            if (openPos.symbol !== currentSymbol) {
+                logToTerminal(`ℹ️ Posición activa en ${openPos.symbol}. Solicitando análisis prioritario de posición abierta...`, 'info');
+            }
+        }
+
+        logToTerminal(`Consultando Orquestador (${targetSymbol}) vía ${engine.toUpperCase()}...`, 'info');
+        
+        const tpSlVal = document.getElementById('tpSlSelect')?.value || "3.0|-2.0";
+        const [tpStr, slStr] = tpSlVal.split('|');
+        const riskVal = document.getElementById('riskSelect')?.value || "0.25";
+        
+        const macroContextText = document.getElementById('macroContext')?.value || '';
+        const sentScore = window.currentSentimentScore || 0;
+        const feeRate = getBrokerFeeRate();
+        const url = `${API_BASE_URL}/api/market/analysis?symbol=${encodeURIComponent(targetSymbol)}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}&fee=${feeRate}&has_position=${hasPosition}&entry_price=${entryPrice}`;
+        
+        // Timeout con AbortController (45s para local/gemini, 120s para modelos locales pesados)
+        const timeoutMs = (engine === 'deepseek' || engine === 'ollama') ? 120000 : 45000;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        let response;
+        try {
+            response = await fetch(url, { signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
+        const data = await response.json();
+        
+        if (data && !data.error) {
+            let logType = 'info';
+            if (data.signal === 'COMPRAR') logType = 'action';
+            if (data.signal === 'VENDER') logType = 'error';
+            
+            const feeStr = data.fee_info ? ` | Fee Broker: ${data.fee_info.round_trip_fee}% ida/vuelta` : '';
+            const rsiDisp = data.indicators?.rsi !== undefined && data.indicators?.rsi !== null ? data.indicators.rsi : '-';
+            const smaDisp = data.indicators?.sma_20 !== undefined && data.indicators?.sma_20 !== null ? data.indicators.sma_20 : '-';
+            logToTerminal(`[${data.signal}] RSI: ${rsiDisp} | SMA20: ${smaDisp}${feeStr}`, 'warn');
+            logToTerminal(`Razonamiento: ${data.reason}`, logType);
+            
+            // Lógica de Paper Trading & Copiloto
+            const baseCoin = targetSymbol.split('/')[0];
+            const executionMode = document.getElementById('executionModeSelect')?.value || 'copilot';
+            
+            // Regla Anti-Overtrading: 1 posición abierta a la vez
+            const isBuyable = data.signal === 'COMPRAR' && !hasPosition;
+            const isSellable = data.signal === 'VENDER' && hasPosition;
+            
+            if (data.signal === 'COMPRAR' && hasPosition) {
+                logToTerminal(`ℹ️ Ya tienes una posición abierta en ${openPos ? openPos.baseCoin : baseCoin}. Re-compra bloqueada para evitar comisiones innecesarias.`, 'warn');
+            }
+            
+            if (isBuyable || isSellable) {
+                let execPrice = currentPrice;
+                if (isSellable) {
+                    execPrice = (openPos.symbol === currentSymbol) ? currentPrice : (window.positionAssetPrice || openPos.entryPrice);
+                }
+
+                if (executionMode === 'auto') {
+                    executeTrade(data.signal, targetSymbol, baseCoin, execPrice, 'Automático');
+                } else {
+                    isCopilotApprovalPause = true;
+                    isAgentActive = false;
+                    document.getElementById('agentToggle').innerText = 'Activar Agente';
+                    document.getElementById('agentToggle').classList.replace('bg-red-600', 'bg-blue-600');
+                    document.getElementById('agentToggle').classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
+                    showCopilotModal(data.signal, targetSymbol, data.reason, baseCoin, execPrice);
+                }
+            }
+        } else {
+            logToTerminal('Error de análisis: ' + (data?.error || 'Respuesta inválida'), 'error');
+        }
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            logToTerminal(`⏳ Timeout de análisis agotado en motor ${engine.toUpperCase()}. El servidor tardó demasiado en responder.`, 'warn');
+        } else {
+            logToTerminal('Fallo de conexión con el Agente Python: ' + err.message, 'error');
+        }
+    } finally {
+        cycleInFlight = false;
+
+        // Calcular próximo intervalo basado en temporalidad y reprogramar deterministamente (Bloque 3)
+        if (isAgentActive) {
+            const tf = document.getElementById('timeframeSelect')?.value || '1m';
+            let delayMs = 60000;
+            if (tf === '5m') delayMs = 300000;
+            if (tf === '15m') delayMs = 900000;
+            if (engine === 'local') delayMs = 15000;
+
+            scheduleNext(delayMs);
+        }
+    }
+};
+
+// Ciclo de Gráfico en Vivo (Cada 2 segundos) para que se mueva rápido con límites y descarte de respuestas tardías
 setInterval(async () => {
     const lobby = document.getElementById("lobbyView");
-    if (lobby && !lobby.classList.contains("hidden")) return; // No hacer nada si estamos en el Lobby
+    if (lobby && !lobby.classList.contains("hidden")) return;
+    const reqSymbol = currentSymbol;
     try {
-        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
+        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${encodeURIComponent(reqSymbol)}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&limit=60`);
+        if (!response.ok) return;
         const data = await response.json();
+        if (reqSymbol !== currentSymbol) return; // Descartar respuesta tardía si el usuario cambió de símbolo
+        
         if (data && data.length > 0) {
             const latest_candle = data[data.length - 1];
             candleSeries.update(latest_candle);
@@ -565,29 +875,89 @@ setInterval(async () => {
             currentPriceElement.innerText = `$${currentPrice.toLocaleString()}`;
             updateCapitalDisplay();
 
-            // -- AGENTE DE RIESGO: Stop Loss y Take Profit Dinámicos --
-            if (portfolio.ASSET > 0.0001 && portfolio.entryPrice > 0) {
-                const pnlPct = ((currentPrice - portfolio.entryPrice) / portfolio.entryPrice) * 100;
-                
-                const tpSlVal = document.getElementById('tpSlSelect')?.value || "1.5|-1.0";
-                const [tpStr, slStr] = tpSlVal.split('|');
-                const takeProfitLimit = parseFloat(tpStr);
-                const stopLossLimit = parseFloat(slStr);
-                
-                // Stop Loss
-                if (pnlPct <= stopLossLimit) {
-                    logToTerminal(`⚠️ AGENTE DE RIESGO: Stop Loss alcanzado (${stopLossLimit}%). Vendiendo para proteger capital.`, 'error');
-                    executeTrade('VENDER', currentSymbol.split('/')[0], currentPrice, 'Stop Loss');
+            // -- AGENTE DE RIESGO: Stop Loss y Take Profit Dinámicos con límites congelados --
+            const pos = getOpenPosition();
+            if (!isExecutingTrade && pos) {
+                let evalPrice = currentPrice;
+                if (pos.symbol !== currentSymbol) {
+                    if (!posPriceInFlight) refreshPositionPrice();
+                    const nowSec = Math.floor(Date.now() / 1000);
+                    const ageSec = nowSec - (window.positionAssetPriceTs || 0);
+
+                    if (window.positionAssetPrice && ageSec <= 20) {
+                        evalPrice = window.positionAssetPrice;
+                    } else {
+                        if (nowSec - lastStaleWarningTs > 60) {
+                            logToTerminal(`⚠️ [RIESGO] SL SIN PRECIO FRESCO (${pos.symbol}, latencia ${ageSec}s). Monitoreando con último valor conocido.`, 'warn');
+                            lastStaleWarningTs = nowSec;
+                        }
+                        evalPrice = window.positionAssetPrice || pos.entryPrice;
+                    }
                 }
-                // Take Profit
-                else if (pnlPct >= takeProfitLimit) {
-                    logToTerminal(`🎯 AGENTE DE RIESGO: Take Profit alcanzado (+${takeProfitLimit}%). Asegurando ganancias.`, 'action');
-                    executeTrade('VENDER', currentSymbol.split('/')[0], currentPrice, 'Take Profit');
+
+                // Cálculo de PnL Neto después de descontar comisiones del broker
+                const feeRate = getBrokerFeeRate();
+                const costBasis = pos.costBasis || (pos.qty * pos.entryPrice);
+                const valorSalidaNeto = pos.qty * evalPrice * (1 - (feeRate / 100));
+                const pnlNetPct = costBasis > 0 ? ((valorSalidaNeto - costBasis) / costBasis) * 100 : 0;
+                
+                // Inicializar variables dinámicas de Breakeven y Trailing si no existieran (Bloque 5)
+                if (typeof pos.peakPrice !== 'number' || pos.peakPrice <= 0) pos.peakPrice = pos.entryPrice;
+                if (typeof pos.slEffPct !== 'number') pos.slEffPct = (pos.sl !== undefined ? pos.sl : 1.0);
+                if (typeof pos.beArmed !== 'boolean') pos.beArmed = false;
+                if (typeof pos.trailPct !== 'number') pos.trailPct = 0.5;
+
+                // Actualizar pico de precio para trailing
+                if (evalPrice > pos.peakPrice) {
+                    pos.peakPrice = evalPrice;
+                }
+
+                const grossGainPct = pos.entryPrice > 0 ? ((evalPrice - pos.entryPrice) / pos.entryPrice) * 100 : 0;
+
+                // 1. Paso Breakeven (K5): activación al cubrir comisiones round-trip + 0.1%
+                const beThreshold = (feeRate * 2.0) + 0.1;
+                if (grossGainPct >= beThreshold && !pos.beArmed) {
+                    pos.slEffPct = -(feeRate * 2.0); // Stop fijado a costo de entrada + fees para pérdida neta 0
+                    pos.beArmed = true;
+                    logToTerminal(`🛡️ [RIESGO] Breakeven armado en ${pos.symbol} (+${grossGainPct.toFixed(2)}% bruto). Stop Loss movido a precio de entrada + comisiones.`, 'action');
+                }
+
+                // 2. Paso Trailing Stop: activación al 60% del camino al Take Profit
+                const takeProfitLimit = pos.tp !== undefined ? pos.tp : 1.5;
+                if (grossGainPct >= (takeProfitLimit * 0.6)) {
+                    const trailSlPrice = pos.peakPrice * (1 - (pos.trailPct / 100));
+                    const trailSlPct = pos.entryPrice > 0 ? ((trailSlPrice - pos.entryPrice) / pos.entryPrice) * 100 : 0;
+                    if (trailSlPct > -pos.slEffPct) {
+                        pos.slEffPct = -trailSlPct;
+                        const nowSec = Math.floor(Date.now() / 1000);
+                        if (nowSec - lastTrailingLogTs > 10) {
+                            logToTerminal(`📈 [RIESGO] Trailing Stop actualizado en ${pos.symbol} (Pico: $${pos.peakPrice.toFixed(2)} | SL dinámico: ${pos.slEffPct > 0 ? '-' : '+'}${Math.abs(pos.slEffPct).toFixed(2)}%).`, 'info');
+                            lastTrailingLogTs = nowSec;
+                        }
+                    }
+                }
+
+                // Persistir posición con throttle de 10s
+                const nowMs = Date.now();
+                if (nowMs - lastPortfolioSaveTs > 10000) {
+                    localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
+                    lastPortfolioSaveTs = nowMs;
+                }
+
+                // Stop Loss (dispara si la pérdida neta supera el límite dinámico slEffPct)
+                if (pnlNetPct <= -pos.slEffPct) {
+                    logToTerminal(`⚠️ AGENTE DE RIESGO: Stop Loss / Breakeven disparado en ${pos.symbol} (${pnlNetPct.toFixed(2)}% neto vs límite -${pos.slEffPct.toFixed(2)}%). Vendiendo para proteger capital.`, 'error');
+                    executeTrade('VENDER', pos.symbol, pos.baseCoin, evalPrice, 'Stop Loss');
+                }
+                // Take Profit (dispara si la ganancia neta supera el objetivo congelado)
+                else if (pnlNetPct >= takeProfitLimit) {
+                    logToTerminal(`🎯 AGENTE DE RIESGO: Take Profit alcanzado en ${pos.symbol} (+${pnlNetPct.toFixed(2)}% neto vs +${takeProfitLimit}% objetivo). Asegurando ganancias.`, 'action');
+                    executeTrade('VENDER', pos.symbol, pos.baseCoin, evalPrice, 'Take Profit');
                 }
             }
         }
     } catch (err) {
-        // Silencioso para no ensuciar la consola
+        // Silencioso
     }
 }, 2000);
 
@@ -595,7 +965,7 @@ setInterval(async () => {
 async function updateSentiment() {
     try {
         const source = document.getElementById('newsSourceSelect')?.value || 'coindesk';
-        const response = await fetch(`${API_BASE_URL}/api/market/sentiment?symbol=${currentSymbol}&source=${source}`);
+        const response = await fetch(`${API_BASE_URL}/api/market/sentiment?symbol=${encodeURIComponent(currentSymbol)}&source=${source}`);
         const data = await response.json();
         if (data && !data.error) {
             window.currentSentimentScore = data.score;
@@ -628,10 +998,10 @@ async function updateSentiment() {
                 div.className = `bg-gray-900 p-2 rounded border-l-2 ${colorClass}`;
                 div.innerHTML = `
                     <p class="text-[10px] text-gray-400 flex justify-between">
-                        <span>📰 ${data.fuente || 'Noticias'}</span>
-                        <span>Score: ${news.score}</span>
+                        <span>📰 ${escapeHtml(data.fuente || 'Noticias')}</span>
+                        <span>Score: ${Number(news.score) || 0}</span>
                     </p>
-                    <p class="text-xs text-gray-200 mt-1">${news.title}</p>
+                    <p class="text-xs text-gray-200 mt-1">${escapeHtml(news.title)}</p>
                 `;
                 container.appendChild(div);
             });
@@ -654,7 +1024,7 @@ if (newsSourceSelect) {
 // --- Agente de Inversiones (Radar Macro) ---
 async function updateMacroRadar() {
     const lobby = document.getElementById("lobbyView");
-    if (lobby && !lobby.classList.contains("hidden")) return; // Pausado en el Lobby
+    if (lobby && !lobby.classList.contains("hidden")) return;
 
     const toggle = document.getElementById('investmentToggle');
     const container = document.getElementById('macroOpportunitiesContainer');
@@ -682,11 +1052,11 @@ async function updateMacroRadar() {
                 div.className = 'bg-gray-800 p-2 rounded border border-gray-600 mb-2';
                 div.innerHTML = `
                     <div class="flex justify-between items-center mb-1">
-                        <span class="text-xs font-bold text-white">${item.asset || 'N/A'}</span>
-                        <span class="text-[10px] ${colorClass} font-bold px-1 rounded">${item.confidence || 0}% Conf.</span>
+                        <span class="text-xs font-bold text-white">${escapeHtml(item.asset || 'N/A')}</span>
+                        <span class="text-[10px] ${colorClass} font-bold px-1 rounded">${Number(item.confidence) || 0}% Conf.</span>
                     </div>
-                    <p class="text-[10px] text-gray-400 leading-tight"><span class="font-bold ${typeColor}">${item.type}:</span> ${item.reason}</p>
-                    <p class="text-[9px] text-gray-500 mt-1">⏳ Sugerido: ${item.schedule || '-'}</p>
+                    <p class="text-[10px] text-gray-400 leading-tight"><span class="font-bold ${typeColor}">${escapeHtml(item.type)}:</span> ${escapeHtml(item.reason)}</p>
+                    <p class="text-[9px] text-gray-500 mt-1">⏳ Sugerido: ${escapeHtml(item.schedule || '-')}</p>
                 `;
                 container.appendChild(div);
             });
@@ -735,173 +1105,450 @@ function renderTradeHistory() {
     
     const todayStr = new Date().toDateString();
     const todaysTrades = tradeHistoryLog.filter(trade => {
-        // Fallback para fechas: si no tiene timestamp, asumimos que no es de hoy
         if (!trade.timestamp) return false; 
         return new Date(trade.timestamp).toDateString() === todayStr;
     });
 
     if (todaysTrades.length === 0) {
-        tbody.innerHTML = `<tr id="emptyHistoryRow"><td colspan="7" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones registradas en el día de hoy.</td></tr>`;
+        const msg = isAgentActive 
+            ? `Sesión #${currentSessionId} activa. Esperando primeras operaciones del día...`
+            : `No hay operaciones registradas en el día de hoy.`;
+        tbody.innerHTML = `<tr id="emptyHistoryRow"><td colspan="7" class="px-4 py-4 text-center ${isAgentActive ? 'text-blue-400' : 'text-gray-600'} italic">${msg}</td></tr>`;
         return;
     }
-    
-    todaysTrades.forEach(trade => {
+
+    const hasTradesInCurrentSession = todaysTrades.some(t => (t.sessionId || 1) === currentSessionId);
+    if (isAgentActive && !hasTradesInCurrentSession) {
+        const activeHeaderTr = document.createElement('tr');
+        activeHeaderTr.className = 'bg-blue-950/40 border-b border-blue-500/40 text-blue-300';
+        activeHeaderTr.innerHTML = `
+            <td colspan="7" class="px-4 py-2 text-center text-xs">
+                <div class="inline-flex items-center space-x-2">
+                    <span class="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                    <span class="font-bold text-white">Sesión Actual Activa (#${currentSessionId})</span>
+                    <span class="text-blue-300/80">— Agente reanudado, monitoreando el mercado...</span>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(activeHeaderTr);
+    }
+
+    let lastSessionSeen = null;
+
+    todaysTrades.forEach((trade, index) => {
+        const tradeSession = trade.sessionId || 1;
+        const isCurrentSession = (tradeSession === currentSessionId);
+
+        if (lastSessionSeen !== null && tradeSession !== lastSessionSeen) {
+            const dividerTr = document.createElement('tr');
+            dividerTr.className = 'bg-gray-900/90 border-y-2 border-dashed border-gray-600/70 text-gray-400 select-none';
+            dividerTr.innerHTML = `
+                <td colspan="7" class="px-4 py-2 text-center">
+                    <div class="inline-flex items-center space-x-2 text-xs text-yellow-400/90 bg-yellow-950/40 px-3 py-1 rounded-full border border-yellow-700/50">
+                        <span>⏸️</span>
+                        <span class="font-semibold text-yellow-300">Agente Suspendido & Reanudado</span>
+                        <span class="text-gray-400">— Operaciones de sesión previa (#${tradeSession})</span>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(dividerTr);
+        } else if (index === 0 && !isCurrentSession) {
+            const dividerTr = document.createElement('tr');
+            dividerTr.className = 'bg-gray-900/90 border-y-2 border-dashed border-gray-600/70 text-gray-400 select-none';
+            dividerTr.innerHTML = `
+                <td colspan="7" class="px-4 py-2 text-center">
+                    <div class="inline-flex items-center space-x-2 text-xs text-gray-400 bg-gray-900/90 px-3 py-1 rounded-full border border-gray-700">
+                        <span>⏸️</span>
+                        <span class="font-semibold text-gray-300">Sesión Previa (#${tradeSession})</span>
+                        <span class="text-gray-500">— Operaciones anteriores a la última suspensión</span>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(dividerTr);
+        }
+
+        lastSessionSeen = tradeSession;
+
         let statusClass = 'text-gray-400';
         if (trade.status === 'Ejecutada') statusClass = 'text-green-400 font-bold';
         if (trade.status === 'Rechazada') statusClass = 'text-red-400 font-bold';
-        let typeClass = trade.signal === 'COMPRAR' ? 'text-green-500' : 'text-red-500';
+        if (trade.status === 'Expirada') statusClass = 'text-yellow-400 font-bold';
+        let typeClass = trade.signal === 'COMPRAR' ? 'text-green-500 font-bold' : 'text-red-500 font-bold';
         const feeVal = trade.fee !== undefined ? trade.fee : 0;
         
         const tr = document.createElement('tr');
-        tr.className = 'border-b border-gray-700/50 hover:bg-gray-700/20';
+        if (isCurrentSession) {
+            tr.className = 'border-b border-blue-900/50 bg-blue-950/20 hover:bg-blue-900/30 transition-colors border-l-4 border-l-blue-500';
+        } else {
+            tr.className = 'border-b border-gray-800 bg-gray-900/50 opacity-75 hover:opacity-100 hover:bg-gray-800/40 transition-all border-l-4 border-l-gray-700';
+        }
+
+        const sessionBadge = isCurrentSession 
+            ? `<span class="inline-block text-[10px] px-1.5 py-0.5 rounded font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/40 ml-1">Actual</span>`
+            : `<span class="inline-block text-[10px] px-1.5 py-0.5 rounded font-normal bg-gray-800 text-gray-400 border border-gray-700 ml-1">Previa</span>`;
+
+        const displaySymbol = escapeHtml(trade.symbol || (trade.baseCoin ? trade.baseCoin + '/USDT' : 'N/A'));
+
         tr.innerHTML = `
-            <td class="px-4 py-2">${trade.timeString}</td>
-            <td class="px-4 py-2 font-bold">${trade.baseCoin}/USDT</td>
-            <td class="px-4 py-2 ${typeClass}">${trade.signal}</td>
-            <td class="px-4 py-2 font-mono">$${trade.price.toLocaleString()}</td>
+            <td class="px-4 py-2 whitespace-nowrap">
+                <span class="font-mono text-gray-200">${escapeHtml(trade.timeString)}</span>
+            </td>
+            <td class="px-4 py-2 font-bold text-white">${displaySymbol}</td>
+            <td class="px-4 py-2 ${typeClass}">
+                ${escapeHtml(trade.signal)}
+            </td>
+            <td class="px-4 py-2 font-mono text-white">$${Number(trade.price || 0).toLocaleString()}</td>
             <td class="px-4 py-2 font-mono text-yellow-400">$${feeVal.toFixed(2)}</td>
-            <td class="px-4 py-2 ${statusClass}">${trade.status}</td>
-            <td class="px-4 py-2 text-xs">${trade.mode}</td>
+            <td class="px-4 py-2 ${statusClass}">${escapeHtml(trade.status)}</td>
+            <td class="px-4 py-2 text-xs text-gray-300 whitespace-nowrap">
+                ${escapeHtml(trade.mode)} ${sessionBadge}
+            </td>
         `;
         tbody.appendChild(tr);
     });
 }
 
-function addTradeToHistory(signal, baseCoin, price, status, mode, fee = 0) {
+function addTradeToHistory(signal, symbol, baseCoin, price, status, mode, fee = 0, qty = 0) {
+    // Normalización defensiva retrocompatible
+    if (typeof price === 'string' && (price === 'Ejecutada' || price === 'Rechazada' || price === 'Expirada')) {
+        qty = fee || 0;
+        fee = mode || 0;
+        mode = status;
+        status = price;
+        price = baseCoin;
+        baseCoin = symbol;
+        symbol = baseCoin ? (baseCoin.includes('/') ? baseCoin : baseCoin + '/USDT') : currentSymbol;
+    }
+
     const now = new Date();
     const timeString = now.toLocaleTimeString();
     const timestamp = now.toISOString();
-    tradeHistoryLog.unshift({ timeString, timestamp, signal, baseCoin, price, status, mode, fee: Number(Number(fee).toFixed(2)) });
+    const effectiveSymbol = symbol || (baseCoin ? baseCoin + '/USDT' : currentSymbol);
+
+    tradeHistoryLog.unshift({ 
+        timeString, 
+        timestamp, 
+        signal, 
+        symbol: effectiveSymbol,
+        baseCoin, 
+        price: Number(price) || 0, 
+        qty: Number(Number(qty || 0).toFixed(6)),
+        status, 
+        mode, 
+        fee: Number(Number(fee).toFixed(2)),
+        sessionId: currentSessionId
+    });
     
-    // Guardar en persistencia local (navegador)
     localStorage.setItem('ai_trade_history_v2', JSON.stringify(tradeHistoryLog));
     
-    // Guardar en archivo persistente (backend CSV)
+    // Guardar en backend CSV incluyendo X-API-Token si existe
+    const token = localStorage.getItem('ai_app_token') || '';
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['X-API-Token'] = token;
+
     fetch(`${API_BASE_URL}/api/log_trade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timeString, symbol: baseCoin, signal, price, status, mode })
+        headers,
+        body: JSON.stringify({ 
+            timeString, 
+            symbol: effectiveSymbol, 
+            signal, 
+            price: Number(price) || 0, 
+            status, 
+            mode,
+            qty: Number(Number(qty || 0).toFixed(6)),
+            fee: Number(Number(fee || 0).toFixed(2)),
+            session_id: currentSessionId 
+        })
     }).catch(err => console.error('Error guardando en archivo CSV:', err));
     
     renderTradeHistory();
 }
 
-function executeTrade(signal, baseCoin, price, mode = 'Automático') {
-    const feeRate = getBrokerFeeRate();
-    if (signal === 'COMPRAR') {
-        // Gestión de Capital Dinámica
-        const riskFactor = parseFloat(document.getElementById('riskSelect')?.value || "0.25");
-        const currency = getCurrency(currentSymbol);
-        const maxRiesgo = portfolio.balances[currency] * riskFactor;
-        const tradeAmount = maxRiesgo;
-        
-        if (tradeAmount < 5) {
-            logToTerminal('⚠️ Saldo insuficiente para abrir nueva posición.', 'error');
+function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
+    // Soporte retrocompatible de 4 argumentos
+    if (typeof baseCoin === 'number') {
+        mode = price || 'Automático';
+        price = baseCoin;
+        baseCoin = symbol ? symbol.split('/')[0] : 'BTC';
+        symbol = symbol ? (symbol.includes('/') ? symbol : symbol + '/USDT') : currentSymbol;
+    }
+
+    if (isExecutingTrade) {
+        logToTerminal('⚠️ Operación en curso. Ignorando solicitud concurrente.', 'warn');
+        return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+        logToTerminal(`⚠️ Ejecución abortada: precio inválido o no numérico ($${price}).`, 'error');
+        return;
+    }
+
+    const effectiveSymbol = symbol || currentSymbol;
+    const currency = getCurrency(effectiveSymbol);
+    if (!Number.isFinite(portfolio.balances[currency])) {
+        logToTerminal(`⚠️ Ejecución abortada: balance no numérico en moneda ${currency}.`, 'error');
+        return;
+    }
+
+    isExecutingTrade = true;
+    try {
+        const openPos = getOpenPosition();
+        const hasPosition = !!openPos;
+
+        if (signal === 'COMPRAR' && hasPosition) {
+            logToTerminal(`⚠️ Compra bloqueada: ya existe una posición activa en ${openPos.baseCoin}.`, 'warn');
+            return;
+        }
+        if (signal === 'VENDER' && !hasPosition) {
+            logToTerminal(`⚠️ Venta ignorada: no hay posición abierta que cerrar.`, 'warn');
             return;
         }
 
-        // Deducción de Comisión del Broker en Compra
-        const feeAmount = tradeAmount * (feeRate / 100);
-        const capitalNeto = tradeAmount - feeAmount;
-        const cantidadAComprar = capitalNeto / price;
-        
-        // Promediar precio de entrada si el bot hace DCA (compras múltiples)
-        const valorPrevio = portfolio.ASSET * portfolio.entryPrice;
-        const valorNuevo = cantidadAComprar * price;
-        
-        portfolio.ASSET += cantidadAComprar;
-        portfolio.balances[currency] -= tradeAmount; // Sale el tradeAmount completo (capital invertido + fee deducido)
-        portfolio.entryPrice = (valorPrevio + valorNuevo) / portfolio.ASSET;
-        portfolio.totalFeesPaid = (portfolio.totalFeesPaid || 0) + feeAmount;
-        
-        logToTerminal(`💰 SIMULACIÓN: COMPRADO ${cantidadAComprar.toFixed(4)} ${baseCoin} a $${price.toLocaleString()} (Inversión: $${tradeAmount.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%])`, 'action');
-        addTradeToHistory(signal, baseCoin, price, 'Ejecutada', mode, feeAmount);
-    } else if (signal === 'VENDER') {
-        const dolaresObtenidosBruto = portfolio.ASSET * price;
-        const feeAmount = dolaresObtenidosBruto * (feeRate / 100);
-        const dolaresNetos = dolaresObtenidosBruto - feeAmount;
-        
-        const currency = getCurrency(currentSymbol);
-        portfolio.balances[currency] += dolaresNetos;
-        portfolio.ASSET = 0;
-        portfolio.entryPrice = 0;
-        portfolio.totalFeesPaid = (portfolio.totalFeesPaid || 0) + feeAmount;
-        
-        logToTerminal(`💵 SIMULACIÓN: VENDIDO ${baseCoin} a $${price.toLocaleString()} (Bruto: $${dolaresObtenidosBruto.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%] | Neto: $${dolaresNetos.toFixed(2)}). Nuevo Saldo ${currency}: $${portfolio.balances[currency].toFixed(2)}`, 'error');
-        
-        // --- LÓGICA DE AUTO-ASEGURAR GANANCIAS ---
-        const autoVaultToggle = document.getElementById('autoVaultToggle');
-        if (autoVaultToggle && autoVaultToggle.checked && portfolio.deposits[currency] > 0) {
-            const threshold = parseFloat(document.getElementById('autoVaultThreshold')?.value || "50");
-            const profitPct = ((portfolio.balances[currency] - portfolio.deposits[currency]) / portfolio.deposits[currency]) * 100;
+        const feeRate = getBrokerFeeRate();
+        if (signal === 'COMPRAR') {
+            const riskFactor = parseFloat(document.getElementById('riskSelect')?.value || "0.25");
+            const maxRiesgo = portfolio.balances[currency] * riskFactor;
+            const tradeAmount = maxRiesgo;
             
-            if (profitPct >= threshold) {
-                const profitToSweep = portfolio.balances[currency] - portfolio.deposits[currency];
-                portfolio.balances[currency] -= profitToSweep;
-                
-                // Convertir ganancia a USD si es necesario y mandar a bóveda
-                if (currency === 'ARS') {
-                    portfolio.VAULT += (profitToSweep / 1000.00);
-                } else {
-                    portfolio.VAULT += profitToSweep;
-                }
-                
-                logToTerminal(`🔒 AUTO-VAULT: Rentabilidad del ${profitPct.toFixed(2)}% alcanzada. Ganancia de $${profitToSweep.toFixed(2)} transferida a la Bóveda Segura.`, 'action');
+            if (tradeAmount < 5) {
+                logToTerminal('⚠️ Saldo insuficiente para abrir nueva posición (mínimo $5).', 'error');
+                return;
             }
+
+            const feeAmount = tradeAmount * (feeRate / 100);
+            const capitalNeto = tradeAmount - feeAmount;
+            const cantidadAComprar = capitalNeto / price;
+            
+            const tpSlVal = document.getElementById('tpSlSelect')?.value || "1.5|-1.0";
+            const [tpStr, slStr] = tpSlVal.split('|');
+            const tpLimit = Math.abs(parseFloat(tpStr)) || 1.5;
+            const slLimit = Math.abs(parseFloat(slStr)) || 1.0;
+
+            portfolio.position = {
+                symbol: effectiveSymbol,
+                baseCoin: baseCoin,
+                currency: currency,
+                qty: cantidadAComprar,
+                entryPrice: price,
+                costBasis: tradeAmount,
+                tp: tpLimit,
+                sl: slLimit,
+                peakPrice: price,
+                slEffPct: slLimit,
+                beArmed: false,
+                trailPct: 0.5,
+                openedAt: new Date().toISOString()
+            };
+            
+            // Espejo retrocompatible
+            portfolio.ASSET = cantidadAComprar;
+            portfolio.entryPrice = price;
+            portfolio.balances[currency] -= tradeAmount;
+            portfolio.totalFeesPaid = (portfolio.totalFeesPaid || 0) + feeAmount;
+            
+            logToTerminal(`💰 SIMULACIÓN: COMPRADO ${cantidadAComprar.toFixed(4)} ${baseCoin} (${effectiveSymbol}) a $${price.toLocaleString()} (Inversión: $${tradeAmount.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%] | TP: +${tpLimit}% | SL: -${slLimit}%)`, 'action');
+            addTradeToHistory(signal, effectiveSymbol, baseCoin, price, 'Ejecutada', mode, feeAmount, cantidadAComprar);
+        } else if (signal === 'VENDER') {
+            // VENDER siempre usa los datos reales de la posición (Bloque 1 item 5)
+            const pos = openPos;
+            const sellSymbol = pos.symbol;
+            const sellCoin = pos.baseCoin;
+            const sellCurrency = pos.currency || getCurrency(sellSymbol);
+            const posQty = pos.qty;
+
+            // Validación de frescura para ventas si no está en pantalla
+            let execSellPrice = price;
+            if (sellSymbol !== currentSymbol && mode !== 'Stop Loss' && mode !== 'Take Profit') {
+                const nowSec = Math.floor(Date.now() / 1000);
+                const ageSec = nowSec - (window.positionAssetPriceTs || 0);
+                if (!window.positionAssetPrice || ageSec > 15) {
+                    logToTerminal(`⚠️ [VENTA ABORTADA] No hay precio fresco (< 15s) de segundo plano para ${sellSymbol}. Cambia al activo en pantalla o espera respuesta del feed.`, 'error');
+                    return;
+                }
+                execSellPrice = window.positionAssetPrice;
+            }
+
+            const dolaresObtenidosBruto = posQty * execSellPrice;
+            const feeAmount = dolaresObtenidosBruto * (feeRate / 100);
+            const dolaresNetos = dolaresObtenidosBruto - feeAmount;
+            const costBasis = pos.costBasis || (posQty * pos.entryPrice);
+            const pnlNeto = dolaresNetos - costBasis;
+            
+            portfolio.balances[sellCurrency] += dolaresNetos;
+            portfolio.position = null;
+            portfolio.ASSET = 0;
+            portfolio.entryPrice = 0;
+            window.positionAssetPrice = null;
+            portfolio.totalFeesPaid = (portfolio.totalFeesPaid || 0) + feeAmount;
+            
+            // Actualizar Circuit Breaker diario (Bloque 4)
+            recordTradeInCircuitBreaker(pnlNeto);
+
+            logToTerminal(`💵 SIMULACIÓN: VENDIDO ${sellCoin} (${sellSymbol}) a $${execSellPrice.toLocaleString()} (Bruto: $${dolaresObtenidosBruto.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%] | Neto: $${dolaresNetos.toFixed(2)} | PnL: ${pnlNeto >= 0 ? '+' : ''}$${pnlNeto.toFixed(2)}). Saldo ${sellCurrency}: $${portfolio.balances[sellCurrency].toFixed(2)}`, 'error');
+            
+            // --- LÓGICA DE AUTO-ASEGURAR GANANCIAS ---
+            const autoVaultToggle = document.getElementById('autoVaultToggle');
+            if (autoVaultToggle && autoVaultToggle.checked && portfolio.deposits[sellCurrency] > 0) {
+                const threshold = parseFloat(document.getElementById('autoVaultThreshold')?.value || "50");
+                const profitPct = ((portfolio.balances[sellCurrency] - portfolio.deposits[sellCurrency]) / portfolio.deposits[sellCurrency]) * 100;
+                
+                if (profitPct >= threshold) {
+                    const profitToSweep = portfolio.balances[sellCurrency] - portfolio.deposits[sellCurrency];
+                    portfolio.balances[sellCurrency] -= profitToSweep;
+                    
+                    if (sellCurrency === 'ARS') {
+                        portfolio.VAULT += (profitToSweep / 1000.00);
+                    } else {
+                        portfolio.VAULT += profitToSweep;
+                    }
+                    
+                    logToTerminal(`🔒 AUTO-VAULT: Rentabilidad del ${profitPct.toFixed(2)}% alcanzada. Ganancia de $${profitToSweep.toFixed(2)} transferida a la Bóveda Segura.`, 'action');
+                }
+            }
+            addTradeToHistory(signal, sellSymbol, sellCoin, execSellPrice, 'Ejecutada', mode, feeAmount, posQty);
         }
-        addTradeToHistory(signal, baseCoin, price, 'Ejecutada', mode, feeAmount);
+        
+        localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
+        updateCapitalDisplay();
+    } finally {
+        isExecutingTrade = false;
     }
-    
-    // Guardar en el navegador (Persistencia)
-    localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
-    
-    updateCapitalDisplay();
 }
 
 let pendingTrade = null;
 const modal = document.getElementById('copilotModal');
 
-function showCopilotModal(signal, reason, baseCoin, price) {
-    document.getElementById('copilotMessage').innerText = `El Agente recomienda ${signal} ${baseCoin} a $${price.toLocaleString()}`;
+function showCopilotModal(signal, symbol, reason, baseCoin, price) {
+    if (copilotExpiryTimer) {
+        clearInterval(copilotExpiryTimer);
+        copilotExpiryTimer = null;
+    }
+    document.getElementById('copilotMessage').innerText = `El Agente recomienda ${signal} ${baseCoin} (${symbol}) a $${price.toLocaleString()}`;
     document.getElementById('copilotReason').innerText = `Razonamiento: ${reason}`;
     modal.classList.remove('hidden');
-    pendingTrade = { signal, baseCoin, price };
+    pendingTrade = { signal, symbol, baseCoin, price, signalPrice: price, openedAt: Date.now() };
+
+    let timeLeft = 120;
+    copilotExpiryTimer = setInterval(() => {
+        timeLeft--;
+        if (timeLeft <= 0) {
+            clearInterval(copilotExpiryTimer);
+            copilotExpiryTimer = null;
+            if (pendingTrade && !modal.classList.contains('hidden')) {
+                modal.classList.add('hidden');
+                logToTerminal(`⌛ [COPILOTO] Orden expirada tras 120s sin confirmación (${pendingTrade.signal} ${pendingTrade.symbol}).`, 'warn');
+                addTradeToHistory(pendingTrade.signal, pendingTrade.symbol, pendingTrade.baseCoin, pendingTrade.signalPrice, 'Expirada', 'Copiloto', 0, 0);
+                pendingTrade = null;
+                isAgentActive = true;
+                agentToggle.innerText = 'Detener Agente (Kill Switch)';
+                agentToggle.classList.replace('bg-blue-600', 'bg-red-600');
+                agentToggle.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
+                scheduleNext(5000);
+            }
+        }
+    }, 1000);
 }
 
+// Tecla ESC para rechazar orden en modal copiloto (Bloque 3 item 3)
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+        document.getElementById('btnReject')?.click();
+    }
+});
+
 document.getElementById('btnReject').addEventListener('click', () => {
+    if (copilotExpiryTimer) {
+        clearInterval(copilotExpiryTimer);
+        copilotExpiryTimer = null;
+    }
     modal.classList.add('hidden');
     if (pendingTrade) {
         logToTerminal('❌ Operación rechazada por el usuario.', 'warn');
-        addTradeToHistory(pendingTrade.signal, pendingTrade.baseCoin, pendingTrade.price, 'Rechazada', 'Copiloto');
+        addTradeToHistory(pendingTrade.signal, pendingTrade.symbol, pendingTrade.baseCoin, pendingTrade.signalPrice, 'Rechazada', 'Copiloto');
         pendingTrade = null;
     }
-    // Reactivar ciclo
-    agentToggle.click(); // Vuelve a encender el agente que se habia pausado al mostrar el modal
+    isCopilotApprovalPause = true;
+    agentToggle.click();
 });
 
 document.getElementById('btnApprove').addEventListener('click', () => {
+    if (copilotExpiryTimer) {
+        clearInterval(copilotExpiryTimer);
+        copilotExpiryTimer = null;
+    }
     modal.classList.add('hidden');
     if (pendingTrade) {
+        const openPos = getOpenPosition();
+        const hasPos = !!openPos;
+        
+        // 1. Revalidar estado antes de ejecutar
+        if (pendingTrade.signal === 'COMPRAR') {
+            if (hasPos) {
+                logToTerminal('⚠️ Orden descartada: ya tienes una posición abierta mientras decidías.', 'warn');
+                pendingTrade = null;
+                isCopilotApprovalPause = true;
+                agentToggle.click();
+                return;
+            }
+            if (currentSymbol !== pendingTrade.symbol) {
+                logToTerminal(`⚠️ Orden de compra descartada: cambiaste de activo en pantalla (${currentSymbol} != ${pendingTrade.symbol}).`, 'warn');
+                pendingTrade = null;
+                isCopilotApprovalPause = true;
+                agentToggle.click();
+                return;
+            }
+        }
+        if (pendingTrade.signal === 'VENDER' && !hasPos) {
+            logToTerminal('⚠️ Orden descartada: la posición ya fue cerrada previamente (ej. Stop Loss).', 'warn');
+            pendingTrade = null;
+            isCopilotApprovalPause = true;
+            agentToggle.click();
+            return;
+        }
+
+        // 2. Control de Slippage
+        const tradeSymbol = pendingTrade.symbol || currentSymbol;
+        const evalCurrentPrice = (tradeSymbol === currentSymbol) ? currentPrice : (window.positionAssetPrice || pendingTrade.signalPrice);
+        if (pendingTrade.signalPrice > 0) {
+            const priceDiffPct = Math.abs((evalCurrentPrice - pendingTrade.signalPrice) / pendingTrade.signalPrice) * 100;
+            if (priceDiffPct > 1.0) {
+                logToTerminal(`⚠️ Deslizamiento detectado (${priceDiffPct.toFixed(2)}%). Ejecutando a precio actual: $${evalCurrentPrice.toLocaleString()}`, 'warn');
+            }
+        }
+
         logToTerminal('✅ Operación aprobada por el usuario.', 'action');
-        executeTrade(pendingTrade.signal, pendingTrade.baseCoin, pendingTrade.price, 'Copiloto');
+        executeTrade(pendingTrade.signal, tradeSymbol, pendingTrade.baseCoin, evalCurrentPrice, 'Copiloto');
         pendingTrade = null;
     }
-    // Reactivar ciclo
-    agentToggle.click(); // Vuelve a encender el agente que se habia pausado al mostrar el modal
+    isCopilotApprovalPause = true;
+    agentToggle.click();
 });
 
-// Cierre Manual de Emergencia
+// Cierre Manual de Emergencia (Bloque 1 item 6)
 window.forceClosePosition = function() {
-    if (portfolio.ASSET > 0) {
-        logToTerminal(`⚠️ CIERRE MANUAL: El usuario forzó el cierre de la posición en curso.`, 'error');
-        const baseCoin = currentSymbol.split('/')[0];
-        executeTrade('VENDER', baseCoin, currentPrice, 'Manual');
+    const pos = getOpenPosition();
+    if (pos) {
+        logToTerminal(`⚠️ CIERRE MANUAL: El usuario forzó el cierre de la posición activa en ${pos.symbol}.`, 'error');
         
-        // Apagar el agente temporalmente si estaba encendido para evitar que compre inmediatamente
+        if (modal && !modal.classList.contains('hidden')) {
+            if (copilotExpiryTimer) {
+                clearInterval(copilotExpiryTimer);
+                copilotExpiryTimer = null;
+            }
+            modal.classList.add('hidden');
+            pendingTrade = null;
+        }
+
+        const activePrice = (pos.symbol === currentSymbol) ? currentPrice : (window.positionAssetPrice || pos.entryPrice);
+        executeTrade('VENDER', pos.symbol, pos.baseCoin, activePrice, 'Manual');
+        
         if (isAgentActive) {
+            isCopilotApprovalPause = false;
             agentToggle.click();
             logToTerminal(`Agente detenido automáticamente por cierre manual. Vuelve a activarlo cuando desees.`, 'warn');
         }
+    } else {
+        logToTerminal(`ℹ️ No hay posición abierta que cerrar.`, 'info');
     }
 };
 
@@ -912,9 +1559,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Funciones interactivas de la Bóveda
 window.inyectarCapital = function(amount) {
-    portfolio.balances[getCurrency(currentSymbol)] += amount;
+    const cur = getCurrency(currentSymbol);
+    portfolio.balances[cur] += amount;
+    portfolio.deposits[cur] = (portfolio.deposits[cur] || 0) + amount;
     localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
-    logToTerminal(`💸 DEPÓSITO: Se han inyectado $${amount} de liquidez al Agente.`, 'action');
+    logToTerminal(`💸 DEPÓSITO: Se han inyectado $${amount} ${cur} de liquidez a la billetera operativa.`, 'action');
     updateCapitalDisplay();
 };
 
@@ -924,9 +1573,13 @@ document.getElementById('saveApiKeyBtn')?.addEventListener('click', async () => 
     const key = document.getElementById('apiKeyInput').value;
     if(!key) return;
     try {
+        const token = localStorage.getItem('ai_app_token') || '';
+        const headers = {'Content-Type': 'application/json'};
+        if (token) headers['X-API-Token'] = token;
+
         const response = await fetch(`${API_BASE_URL}/api/config/gemini`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers,
             body: JSON.stringify({api_key: key})
         });
         const data = await response.json();
@@ -1116,21 +1769,31 @@ function generarResumen() {
             if (!posicionesAbiertas[asst]) {
                 posicionesAbiertas[asst] = [];
             }
-            posicionesAbiertas[asst].push({ precioCompra: precio, timestamp: trade.timestamp, timeString: trade.timeString, fee: trade.fee || 0 });
+            const tradeQty = (trade.qty && trade.qty > 0) ? trade.qty : 1;
+            posicionesAbiertas[asst].push({ 
+                precioCompra: precio, 
+                qty: tradeQty,
+                timestamp: trade.timestamp, 
+                timeString: trade.timeString, 
+                fee: trade.fee || 0 
+            });
         } else if (trade.signal === 'VENDER') {
             if (posicionesAbiertas[asst] && posicionesAbiertas[asst].length > 0) {
                 const compra = posicionesAbiertas[asst].shift();
                 const feeVenta = trade.fee || 0;
                 const feeCompra = compra.fee || 0;
                 const feeTotalTrade = feeCompra + feeVenta;
-                const pnlBruto = precio - compra.precioCompra;
+                const matchedQty = (trade.qty && trade.qty > 0) ? trade.qty : (compra.qty || 1);
+                const pnlBruto = (precio - compra.precioCompra) * matchedQty;
                 const pnlNeto = pnlBruto - feeTotalTrade;
-                const pnlPercent = (pnlNeto / compra.precioCompra) * 100;
+                const costoBase = (compra.precioCompra * matchedQty);
+                const pnlPercent = costoBase > 0 ? (pnlNeto / costoBase) * 100 : 0;
                 
                 tradesCerrados.push({
                     activo: asst,
                     compra: compra.precioCompra,
                     venta: precio,
+                    qty: matchedQty,
                     feeTotal: feeTotalTrade,
                     pnl: pnlNeto,
                     pnlPercent: pnlPercent,
@@ -1167,21 +1830,25 @@ function generarResumen() {
     
     // Dinero actual en cuenta (Bóveda + Billetera Operativa + Posición abierta)
     let asstValue = 0;
-    if (portfolio.ASSET && portfolio.ASSET > 0) {
-        asstValue = portfolio.ASSET * currentPrice;
+    const openPos = getOpenPosition();
+    if (openPos) {
+        const evalPrice = (openPos.symbol === currentSymbol) ? currentPrice : (window.positionAssetPrice || openPos.entryPrice);
+        if (openPos.currency === currency) {
+            asstValue = openPos.qty * evalPrice;
+        }
     }
     // El bot y el Resumen se enfocan EXCLUSIVAMENTE en la Billetera Operativa Activa (Aislamiento de Fondos)
     const saldoOperativoActual = (portfolio.balances && portfolio.balances[currency] !== undefined)
                                     ? portfolio.balances[currency] + asstValue
                                     : (portfolio[currency] || 0) + asstValue;
     
-    // El Resultado Neto real es la suma matemática de los trades de la billetera activa
-    const resultadoNeto = totalPnl;
-    
-    // Capital Inicial y Final de la Billetera Operativa (la Bóveda queda completamente aislada)
-    const capInicial = saldoOperativoActual - resultadoNeto;
+    // Base de Capital Inicial: toma siempre la base real inyectada por el usuario (sin maquillar comisiones)
+    const baseFondeada = (portfolio.deposits && portfolio.deposits[currency] > 0) ? portfolio.deposits[currency] : (saldoOperativoActual - totalPnl);
+    const capInicial = baseFondeada;
     const capFinal = saldoOperativoActual;
     
+    // El Resultado Neto real es la diferencia entre el capital final (efectivo + valor actual de posición) y el inicial depositado
+    const resultadoNeto = capFinal - capInicial;
     const rentabilidadGlobal = capInicial > 0 ? ((resultadoNeto / capInicial) * 100).toFixed(2) : 0;
     
     // Actualizar UI
@@ -1219,7 +1886,11 @@ function generarResumen() {
     tbody.innerHTML = '';
     
     if (tradesCerrados.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones de ciclo completo (Compra y Venta) en este periodo.</td></tr>`;
+        if (openPos) {
+            tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-4 text-center text-yellow-400 font-medium bg-yellow-900/10">⏳ Posición activa en curso (${openPos.qty.toFixed(6)} ${escapeHtml(openPos.baseCoin)} comprados a $${openPos.entryPrice.toLocaleString()}). Las estadísticas de acierto (Win Rate) y curva se completarán al cerrar la venta.</td></tr>`;
+        } else {
+            tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones de ciclo completo (Compra y Venta) en este periodo.</td></tr>`;
+        }
     } else {
         tradesCerrados.forEach(t => {
             const tr = document.createElement('tr');
@@ -1227,7 +1898,7 @@ function generarResumen() {
             const signTr = t.pnl > 0 ? '+' : '';
             tr.innerHTML = `
                 <td class="px-4 py-2">${new Date(t.timestampVenta).toLocaleString()}</td>
-                <td class="px-4 py-2 font-bold">${t.activo}</td>
+                <td class="px-4 py-2 font-bold">${escapeHtml(t.activo)}</td>
                 <td class="px-4 py-2 text-gray-300">$${t.compra.toFixed(2)}</td>
                 <td class="px-4 py-2 text-gray-300">$${t.venta.toFixed(2)}</td>
                 <td class="px-4 py-2 font-mono text-yellow-400">$${t.feeTotal.toFixed(2)}</td>
@@ -1341,11 +2012,12 @@ if (btnPremarket) {
             window.premarketData = data; // Guardamos globalmente
             logToTerminal(`PRE-MARKET COMPLETADO: ${data.resumen_general}`, "success");
             
-            // Si hay activos analizados, los listamos en el terminal
+            // Si hay activos analizados, los listamos en el terminal (Bloque 7)
             if (data.activos && data.activos.length > 0) {
                 data.activos.forEach(a => {
-                    const color = a.consenso_direccional === "ALCISTA" ? "text-green-400" : (a.consenso_direccional === "BAJISTA" || a.consenso_direccional === "PELIGRO" ? "text-red-400" : "text-yellow-400");
-                    logToTerminal(`Consenso [${a.simbolo}]: <span class="${color} font-bold">${a.consenso_direccional}</span>. Razón: ${a.razonamiento}. Autorizado: ${a.autorizar_operacion}`, "system");
+                    const msg = `Consenso [${a.simbolo || 'N/A'}]: ${a.consenso_direccional || 'NEUTRAL'}. Razón: ${a.razonamiento || '-'}. Autorizado: ${a.autorizar_operacion || false}`;
+                    const logType = a.consenso_direccional === "ALCISTA" ? "action" : (a.consenso_direccional === "BAJISTA" || a.consenso_direccional === "PELIGRO" ? "error" : "warn");
+                    logToTerminal(msg, logType);
                 });
             }
             
@@ -1409,19 +2081,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 const data = await res.json();
                 
                 if (data.status === "error") {
-                    lobbyReportBox.innerHTML = `<span class="text-red-400">Error: ${data.message}</span>`;
+                    lobbyReportBox.innerHTML = `<span class="text-red-400">Error: ${escapeHtml(data.message)}</span>`;
                 } else if (data.status === "idle") {
-                    lobbyReportBox.innerHTML = `<span class="text-gray-400">${data.message}</span>`;
+                    lobbyReportBox.innerHTML = `<span class="text-gray-400">${escapeHtml(data.message)}</span>`;
                 } else {
                     let html = `<p class="font-bold text-white text-base mb-2">Resumen General:</p>
-                                <p class="mb-4 text-green-300">${data.resumen_general}</p>
+                                <p class="mb-4 text-green-300">${escapeHtml(data.resumen_general)}</p>
                                 <p class="font-bold text-white text-base mb-2">Análisis por Activo:</p><ul class="space-y-2">`;
                     if (data.activos) {
                         data.activos.forEach(a => {
+                            const dir = escapeHtml(a.consenso_direccional);
                             const color = a.consenso_direccional === "ALCISTA" ? "text-green-400" : (a.consenso_direccional === "BAJISTA" || a.consenso_direccional === "PELIGRO" ? "text-red-400" : "text-yellow-400");
                             html += `<li class="bg-gray-800 p-2 rounded border border-gray-700">
-                                <span class="font-bold text-white">${a.simbolo}</span> - <span class="${color} font-bold">${a.consenso_direccional}</span><br>
-                                <span class="text-gray-400 text-xs">${a.razonamiento}</span>
+                                <span class="font-bold text-white">${escapeHtml(a.simbolo)}</span> - <span class="${color} font-bold">${dir}</span><br>
+                                <span class="text-gray-400 text-xs">${escapeHtml(a.razonamiento)}</span>
                             </li>`;
                         });
                     }
@@ -1429,7 +2102,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     lobbyReportBox.innerHTML = html;
                 }
             } catch (e) {
-                lobbyReportBox.innerHTML = `<span class="text-red-400">Fallo de red: ${e.message}</span>`;
+                lobbyReportBox.innerHTML = `<span class="text-red-400">Fallo de red: ${escapeHtml(e.message)}</span>`;
             }
             
             btnLobbyPremarket.innerHTML = '✅ Reporte Generado';
@@ -1474,3 +2147,10 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 });
+
+// ==============================================================================
+// // TODO(FASE5):
+// - Slippage dinámico y spread en Paper Trading: simular peor ejecución en órdenes de mercado (0.05% de slippage mínimo + spread del orderbook).
+// - Soporte multi-posición: transicionar portfolio.position a portfolio.positions (array indexado por symbol) con límites de exposición por activo y global.
+// - Event ledger inmutable: migrar historial_trades.csv a SQLite con checksum sha256 encadenado por fila para auditoría de live trading.
+// ==============================================================================

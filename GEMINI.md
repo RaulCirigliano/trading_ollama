@@ -21,3 +21,11 @@ Cuando el proyecto migre de "Paper Trading" a "Dinero Real", se debe priorizar e
 ## Mantenimiento de la Documentación (CONTEXTO.md)
 1. **Clasificación Proactiva:** Cuando el usuario pida agregar nuevas directivas o reglas al proyecto, antes de modificar `CONTEXTO.md`, la IA debe analizar la estructura del documento y recomendarle al usuario si la nueva regla encaja en un ítem/sección existente o si amerita crear un bloque nuevo.
 2. **Preservación del Grupo Central:** Toda directiva relacionada con brokers, comisiones o seguridad del capital debe ir obligatoriamente a la Sección 6 (Protocolos de Live Trading).
+
+## Protocolo de Auditorías Externas y Verificación Cruzada (Audit-Fix Cycle)
+Cuando se someta el proyecto a una auditoría de un modelo externo (ej. Sora, Claude, o1):
+1. **Matriz de Trazabilidad:** Todo diagnóstico recibido debe mapearse en una tabla de estado: [Implementado / Parcial / No implementado / Descartado (con motivo)], detallando archivos y funciones afectadas.
+2. **Cierre de Ciclo Documental:** Tras aplicar los parches:
+   - Se debe actualizar `CONTEXTO.md` según la regla de clasificación proactiva (brokers y seguridad siempre en Sección 6).
+   - Se debe incorporar en el informe del auditor una sección "Respuesta de Implementación" con la matriz de hallazgos, cambios clave y puntos de validación manual.
+   - Se debe formular un prompt de contra-revisión para que el auditor externo valide que la solución no introdujo regresiones antes de dar por cerrado el hito.
