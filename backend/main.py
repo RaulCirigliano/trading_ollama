@@ -138,6 +138,8 @@ def _fetch_raw_price(symbol: str):
             price = None
         if price is None or not isinstance(price, (int, float)) or price <= 0:
             hist = ticker.history(period='1d', interval='1m')
+            if hist.empty:
+                hist = ticker.history(period='5d', interval='1m')
             if not hist.empty:
                 price = float(hist['Close'].iloc[-1])
             else:

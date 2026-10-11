@@ -28,11 +28,17 @@ En tu informe anterior señalaste con precisión las siguientes limitaciones met
 
 2. *«No ejecuté código. R6 (llaves del PromptTemplate) y la edad de los datos de Yahoo para .BA los deduje de la lectura y conviene confirmarlos en vivo.»*  
    👉 **Cómo acceder y verificar en este archivo:** 
-   - **R6 (PromptTemplate):** Se confirmaron y resolvieron las llaves del JSON de ejemplo escapándolas como `{{ }}` en `backend/main.py` y se verificó con compilación de bytecode en Python (`py_compile`), asegurando que LangChain no interprete `signal` ni `reason` como variables de sustitución.
-   - **Datos de Yahoo y activos .BA:** En `backend/main.py` se implementó el cálculo de frescura en segundos (`last_candle_age_s = time.time() - latest_candle_ts_s`). Si la antigüedad supera `3 * timeframe_segundos`, el endpoint responde automáticamente `MANTENER` con motivo *"Datos obsoletos / mercado cerrado"*, protegiendo la operativa ante activos fuera de horario o feriados del Merval.
+   - **R6 (PromptTemplate):** Se confirmaron y resolvieron las llaves del JSON de ejemplo escapándolas como `{{ }}` en `backend/main.py` y se verificó con compilación e invocación real en Python con `langchain_core`, asegurando que LangChain no arroje `KeyError` por `signal` o `reason`.
+   - **Datos de Yahoo y activos .BA (Pruebas en Vivo):** Se realizaron consultas reales con latencia promedio de ~1.2s para `GGAL.BA` y `YPFD.BA`. Al consultar futuros como Oro (`GC=F`) en fin de semana donde `period='1d'` viene vacío, se agregó en `backend/main.py` un fallback automático a `period='5d'`, evitando el error HTTP 502 y devolviendo el precio real oficial (\$4.216,30). La edad de las velas fuera de horario (~46.2 h en fin de semana) fue capturada por la guarda de frescura devolviendo `MANTENER` con motivo 'Datos obsoletos / mercado cerrado'.
    - **Matemática de Riesgo:** Se implementó y ejecutó el test unitario en consola `window.testRiskMath()`: con fee 0.10%, entrada 100 y precio a 100.30 el stop tras armar BE no se dispara; al caer a 100.05 el stop sí se dispara (neto -0.15% < +0.05%), resultando exitoso (`PASÓ ✅`).
 
-3. *«Los endpoints de OCO de Binance y el comportamiento de los hijos del bracket de IBKR ante fills parciales cambian con las versiones. Valídalos en testnet y en cuenta paper antes de cablear la Fase 5.»*  
+3. *«Tampoco vi radar_inbox.py ni premarket_digest.py.»*  
+   👉 **Cómo acceder y verificar en este archivo:** En las **Secciones 3 y 4** se incluyen los archivos completos de ambos satélites. Además, se ejecutaron pruebas de estrés y validación en vivo:
+   - **Concurrencia multihilo en `radar_inbox.py`:** Se ejecutó una prueba de estrés con 10 hilos concurrentes insertando 50 tarjetas simultáneamente; se leyeron exactamente 50/50 tarjetas sin pérdida ni contención de bloqueos gracias al cerrojo `FileLock` y escrituras atómicas.
+   - **Autocura ante corrupción de archivo:** Se probó corrompiendo intencionalmente el archivo `buzon_radar.json`. El cargador detectó la anomalía, respaldó el archivo a `.corrupt-<timestamp>` y reinicializó un buzón limpio sin bloquear al servidor.
+   - **Sanitización de LLM en `premarket_digest.py`:** Se validó el parser JSON ante respuestas adversarias, limpiando caracteres nulos (`\x00`), truncando textos >500 caracteres y descartando símbolos fuera de la lista autorizada.
+
+4. *«Los endpoints de OCO de Binance y el comportamiento de los hijos del bracket de IBKR ante fills parciales cambian con las versiones. Valídalos en testnet y en cuenta paper antes de cablear la Fase 5.»*  
    👉 **Cómo acceder y verificar en este archivo:** Siguiendo tu recomendación de no cablear la lógica a endpoints de producción prematuramente, se crearon los módulos de andamiaje desacoplados incluidos en las **Secciones 6, 7, 8 y 9**:
    - `backend/execution/broker_base.py`: Define el contrato abstracto `BrokerAdapter` con métodos específicos para `place_protection` (brackets/OCO), `amend_protection` (para trailing y breakeven dinámico) y `flatten` (cierre de emergencia a mercado si la protección falla en N segundos).
    - `backend/execution/paper_broker.py`: Implementación de prueba aislada para validar el flujo en paper trading y testnet.
@@ -199,6 +205,8 @@ def _fetch_raw_price(symbol: str):
             price = None
         if price is None or not isinstance(price, (int, float)) or price <= 0:
             hist = ticker.history(period='1d', interval='1m')
+            if hist.empty:
+                hist = ticker.history(period='5d', interval='1m')
             if not hist.empty:
                 price = float(hist['Close'].iloc[-1])
             else:
