@@ -1357,6 +1357,13 @@ document.getElementById('clearLogs').addEventListener('click', () => {
 
 // -- Funciones de Trading y Copiloto --
 
+let isTradeHistoryExpanded = false;
+
+window.toggleTradeHistory = function() {
+    isTradeHistoryExpanded = !isTradeHistoryExpanded;
+    renderTradeHistory();
+};
+
 function renderTradeHistory() {
     const tbody = document.getElementById('tradeHistoryBody');
     if (!tbody) return;
@@ -1368,6 +1375,22 @@ function renderTradeHistory() {
         return new Date(trade.timestamp).toDateString() === todayStr;
     });
 
+    const currentSessionTrades = todaysTrades.filter(t => (t.sessionId || 1) === currentSessionId);
+    const previousSessionTrades = todaysTrades.filter(t => (t.sessionId || 1) !== currentSessionId);
+
+    const toggleBtn = document.getElementById('btnToggleHistory');
+    if (toggleBtn) {
+        if (previousSessionTrades.length > 0) {
+            toggleBtn.classList.remove('hidden');
+            toggleBtn.innerText = isTradeHistoryExpanded ? 'Ocultar previas' : `Mostrar previas (${previousSessionTrades.length})`;
+            toggleBtn.className = isTradeHistoryExpanded
+                ? 'bg-gray-700 hover:bg-gray-600 text-white font-semibold py-1 px-3 rounded text-xs transition border border-gray-600'
+                : 'bg-blue-600 hover:bg-blue-700 text-white font-semibold py-1 px-3 rounded text-xs transition shadow';
+        } else {
+            toggleBtn.classList.add('hidden');
+        }
+    }
+
     if (todaysTrades.length === 0) {
         const msg = isAgentActive 
             ? `Sesión #${currentSessionId} activa. Esperando primeras operaciones del día...`
@@ -1376,8 +1399,40 @@ function renderTradeHistory() {
         return;
     }
 
-    const hasTradesInCurrentSession = todaysTrades.some(t => (t.sessionId || 1) === currentSessionId);
-    if (isAgentActive && !hasTradesInCurrentSession) {
+    // Si está colapsado y la sesión actual aún no tiene operaciones
+    if (!isTradeHistoryExpanded && currentSessionTrades.length === 0) {
+        const waitingTr = document.createElement('tr');
+        waitingTr.className = 'bg-blue-950/30 text-blue-300 border-b border-blue-900/40';
+        waitingTr.innerHTML = `
+            <td colspan="7" class="px-4 py-4 text-center text-xs">
+                <div class="inline-flex items-center space-x-2">
+                    <span class="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                    <span class="font-bold text-white">Sesión Actual (#${currentSessionId})</span>
+                    <span class="text-blue-300/80">— Sin operaciones aún en esta sesión.</span>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(waitingTr);
+
+        if (previousSessionTrades.length > 0) {
+            const expandFooterTr = document.createElement('tr');
+            expandFooterTr.className = 'bg-gray-900/90 hover:bg-gray-800 cursor-pointer border-t border-gray-700 text-center select-none transition-colors';
+            expandFooterTr.onclick = window.toggleTradeHistory;
+            expandFooterTr.innerHTML = `
+                <td colspan="7" class="px-4 py-2.5 text-xs font-semibold text-blue-400 hover:text-blue-300">
+                    ▼ Ver ${previousSessionTrades.length} ${previousSessionTrades.length === 1 ? 'operación previa' : 'operaciones previas'}
+                </td>
+            `;
+            tbody.appendChild(expandFooterTr);
+        }
+        return;
+    }
+
+    // Lista a renderizar: si expandido -> todas; si colapsado -> solo las de la sesión actual
+    const tradesToShow = isTradeHistoryExpanded ? todaysTrades : currentSessionTrades;
+
+    // Encabezado si el agente está activo y en vista expandida la sesión actual no tiene operaciones
+    if (isAgentActive && currentSessionTrades.length === 0) {
         const activeHeaderTr = document.createElement('tr');
         activeHeaderTr.className = 'bg-blue-950/40 border-b border-blue-500/40 text-blue-300';
         activeHeaderTr.innerHTML = `
@@ -1394,36 +1449,39 @@ function renderTradeHistory() {
 
     let lastSessionSeen = null;
 
-    todaysTrades.forEach((trade, index) => {
+    tradesToShow.forEach((trade, index) => {
         const tradeSession = trade.sessionId || 1;
         const isCurrentSession = (tradeSession === currentSessionId);
 
-        if (lastSessionSeen !== null && tradeSession !== lastSessionSeen) {
-            const dividerTr = document.createElement('tr');
-            dividerTr.className = 'bg-gray-900/90 border-y-2 border-dashed border-gray-600/70 text-gray-400 select-none';
-            dividerTr.innerHTML = `
-                <td colspan="7" class="px-4 py-2 text-center">
-                    <div class="inline-flex items-center space-x-2 text-xs text-yellow-400/90 bg-yellow-950/40 px-3 py-1 rounded-full border border-yellow-700/50">
-                        <span>⏸️</span>
-                        <span class="font-semibold text-yellow-300">Agente Suspendido & Reanudado</span>
-                        <span class="text-gray-400">— Operaciones de sesión previa (#${tradeSession})</span>
-                    </div>
-                </td>
-            `;
-            tbody.appendChild(dividerTr);
-        } else if (index === 0 && !isCurrentSession) {
-            const dividerTr = document.createElement('tr');
-            dividerTr.className = 'bg-gray-900/90 border-y-2 border-dashed border-gray-600/70 text-gray-400 select-none';
-            dividerTr.innerHTML = `
-                <td colspan="7" class="px-4 py-2 text-center">
-                    <div class="inline-flex items-center space-x-2 text-xs text-gray-400 bg-gray-900/90 px-3 py-1 rounded-full border border-gray-700">
-                        <span>⏸️</span>
-                        <span class="font-semibold text-gray-300">Sesión Previa (#${tradeSession})</span>
-                        <span class="text-gray-500">— Operaciones anteriores a la última suspensión</span>
-                    </div>
-                </td>
-            `;
-            tbody.appendChild(dividerTr);
+        // Separadores de sesión en vista expandida
+        if (isTradeHistoryExpanded) {
+            if (lastSessionSeen !== null && tradeSession !== lastSessionSeen) {
+                const dividerTr = document.createElement('tr');
+                dividerTr.className = 'bg-gray-900/90 border-y-2 border-dashed border-gray-600/70 text-gray-400 select-none';
+                dividerTr.innerHTML = `
+                    <td colspan="7" class="px-4 py-2 text-center">
+                        <div class="inline-flex items-center space-x-2 text-xs text-yellow-400/90 bg-yellow-950/40 px-3 py-1 rounded-full border border-yellow-700/50">
+                            <span>⏸️</span>
+                            <span class="font-semibold text-yellow-300">Agente Suspendido & Reanudado</span>
+                            <span class="text-gray-400">— Operaciones de sesión previa (#${tradeSession})</span>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(dividerTr);
+            } else if (index === 0 && !isCurrentSession) {
+                const dividerTr = document.createElement('tr');
+                dividerTr.className = 'bg-gray-900/90 border-y-2 border-dashed border-gray-600/70 text-gray-400 select-none';
+                dividerTr.innerHTML = `
+                    <td colspan="7" class="px-4 py-2 text-center">
+                        <div class="inline-flex items-center space-x-2 text-xs text-gray-400 bg-gray-900/90 px-3 py-1 rounded-full border border-gray-700">
+                            <span>⏸️</span>
+                            <span class="font-semibold text-gray-300">Sesión Previa (#${tradeSession})</span>
+                            <span class="text-gray-500">— Operaciones anteriores a la última suspensión</span>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(dividerTr);
+            }
         }
 
         lastSessionSeen = tradeSession;
@@ -1465,6 +1523,19 @@ function renderTradeHistory() {
         `;
         tbody.appendChild(tr);
     });
+
+    if (previousSessionTrades.length > 0) {
+        const expandFooterTr = document.createElement('tr');
+        expandFooterTr.className = 'bg-gray-900/90 hover:bg-gray-800 cursor-pointer border-t border-gray-700 text-center select-none transition-colors';
+        const hiddenCount = previousSessionTrades.length;
+        expandFooterTr.onclick = window.toggleTradeHistory;
+        expandFooterTr.innerHTML = `
+            <td colspan="7" class="px-4 py-2.5 text-xs font-semibold ${isTradeHistoryExpanded ? 'text-gray-400 hover:text-white' : 'text-blue-400 hover:text-blue-300'}">
+                ${isTradeHistoryExpanded ? '▲ Ocultar operaciones previas (ver solo sesión actual)' : `▼ Ver ${hiddenCount} ${hiddenCount === 1 ? 'operación previa' : 'operaciones previas'}`}
+            </td>
+        `;
+        tbody.appendChild(expandFooterTr);
+    }
 }
 
 function addTradeToHistory(signal, symbol, baseCoin, price, status, mode, fee = 0, qty = 0) {
