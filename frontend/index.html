@@ -211,8 +211,13 @@
                     <h2 class="text-lg font-semibold text-white flex items-center">
                         <span class="mr-2">📝</span> Historial de Operaciones y Rendimiento
                     </h2>
-                    <div class="bg-gray-900 px-3 py-1 rounded border border-gray-600 text-xs">
-                        Rendimiento Neto: <span id="pnlDisplay" class="font-bold text-gray-400">$0.00 (0.00%)</span>
+                    <div class="flex items-center space-x-2">
+                        <div class="bg-gray-900 px-2.5 py-1 rounded border border-yellow-700/50 text-xs text-yellow-400">
+                            Comisiones Broker: <span id="totalFeesDisplay" class="font-bold text-yellow-300">$0.00</span>
+                        </div>
+                        <div class="bg-gray-900 px-3 py-1 rounded border border-gray-600 text-xs">
+                            Rendimiento Neto: <span id="pnlDisplay" class="font-bold text-gray-400">$0.00 (0.00%)</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -224,13 +229,14 @@
                                 <th class="px-4 py-2">Activo</th>
                                 <th class="px-4 py-2">Tipo</th>
                                 <th class="px-4 py-2">Precio</th>
+                                <th class="px-4 py-2 text-yellow-400">Fee Broker</th>
                                 <th class="px-4 py-2">Estado</th>
                                 <th class="px-4 py-2 rounded-tr">Modo</th>
                             </tr>
                         </thead>
                         <tbody id="tradeHistoryBody" class="divide-y divide-gray-700">
                             <tr id="emptyHistoryRow">
-                                <td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones registradas aún.</td>
+                                <td colspan="7" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones registradas aún.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -264,7 +270,7 @@
                         Generar Resumen
                     </button>
                     
-                    <div id="resumenStats" class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6 hidden">
+                    <div id="resumenStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 hidden">
                         <div class="bg-gray-900 p-3 rounded border border-gray-700 text-center">
                             <div class="text-xs text-gray-400">Dinero Inicial</div>
                             <div id="resDineroInicial" class="text-xl font-bold text-white">$0.00</div>
@@ -277,6 +283,10 @@
                             <div class="text-xs text-gray-400">Resultado Neto</div>
                             <div id="resResultadoNeto" class="text-xl font-bold">$0.00</div>
                         </div>
+                        <div class="bg-gray-900 p-3 rounded border border-yellow-800/40 text-center">
+                            <div class="text-xs text-yellow-400">Comisiones Broker</div>
+                            <div id="resComisionesBroker" class="text-xl font-bold text-yellow-300">$0.00</div>
+                        </div>
                         <div class="bg-gray-900 p-3 rounded border border-gray-700 text-center md:col-span-1">
                             <div class="text-xs text-gray-400">% de Ganancia / Pérdida</div>
                             <div id="resPorcentaje" class="text-xl font-bold">0.00%</div>
@@ -285,7 +295,7 @@
                             <div class="text-xs text-gray-400">Total Operaciones (Rango)</div>
                             <div id="resTotalTrades" class="text-xl font-bold text-white">0</div>
                         </div>
-                        <div class="bg-gray-900 p-3 rounded border border-gray-700 text-center md:col-span-1">
+                        <div class="bg-gray-900 p-3 rounded border border-gray-700 text-center md:col-span-2">
                             <div class="text-xs text-gray-400">Win Rate (Aciertos)</div>
                             <div id="resWinRate" class="text-xl font-bold text-white">0%</div>
                         </div>
@@ -307,7 +317,8 @@
                                     <th class="px-4 py-2">Activo</th>
                                     <th class="px-4 py-2">Compra</th>
                                     <th class="px-4 py-2">Venta</th>
-                                    <th class="px-4 py-2">Resultado ($)</th>
+                                    <th class="px-4 py-2 text-yellow-400">Comisión Broker</th>
+                                    <th class="px-4 py-2">Resultado Neto ($)</th>
                                 </tr>
                             </thead>
                             <tbody id="resumenDetalleBody" class="divide-y divide-gray-700">
@@ -368,6 +379,24 @@
                             <option value="3.0|-2.0" selected>Ganar +3.0% | Perder -2.0% (Normal)</option>
                             <option value="4.0|-2.0">Ganar +4.0% | Perder -2.0% (Swing)</option>
                         </select>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="block text-xs text-gray-400">Comisión Broker (% por orden)</label>
+                            <span id="roundTripBadge" class="text-[10px] bg-yellow-500/10 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/30 font-mono">Round-Trip: 0.20%</span>
+                        </div>
+                        <select id="brokerFeeSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="0.10" selected>0.10% (Cripto Spot - Binance / Bybit)</option>
+                            <option value="0.25">0.25% (Acciones EE.UU. / Broker Estándar)</option>
+                            <option value="0.50">0.50% (Bursátil Local / Cedears / Bonos)</option>
+                            <option value="0.00">0.00% (Simulación Cero Comisión)</option>
+                            <option value="custom">Personalizado...</option>
+                        </select>
+                        <div id="customFeeWrapper" class="hidden mt-1.5 flex items-center space-x-2">
+                            <input type="number" id="customFeeInput" step="0.01" min="0" max="10" placeholder="Ej: 0.15" class="bg-gray-900 text-white w-full rounded p-1 text-xs border border-gray-700">
+                            <span class="text-xs text-gray-400">%</span>
+                        </div>
                     </div>
                                         <div>
                         <label class="block text-xs text-gray-400 mb-1">Horario de Operación</label>

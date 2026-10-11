@@ -158,6 +158,26 @@ if (typeof portfolio.deposits.ARS !== 'number' || isNaN(portfolio.deposits.ARS))
 if (typeof portfolio.VAULT !== 'number' || isNaN(portfolio.VAULT)) portfolio.VAULT = 500.00;
 if (typeof portfolio.ASSET !== 'number' || isNaN(portfolio.ASSET)) portfolio.ASSET = 0;
 if (typeof portfolio.entryPrice !== 'number' || isNaN(portfolio.entryPrice)) portfolio.entryPrice = 0;
+if (typeof portfolio.totalFeesPaid !== 'number' || isNaN(portfolio.totalFeesPaid)) portfolio.totalFeesPaid = 0;
+
+function getBrokerFeeRate() {
+    const feeSelect = document.getElementById('brokerFeeSelect');
+    if (!feeSelect) return 0.10;
+    if (feeSelect.value === 'custom') {
+        const customInput = document.getElementById('customFeeInput');
+        const val = parseFloat(customInput?.value);
+        return isNaN(val) ? 0.10 : Math.max(0, val);
+    }
+    return parseFloat(feeSelect.value) || 0;
+}
+
+function updateBrokerFeeDisplay() {
+    const rate = getBrokerFeeRate();
+    const badge = document.getElementById('roundTripBadge');
+    if (badge) {
+        badge.innerText = `Round-Trip: ${(rate * 2).toFixed(2)}%`;
+    }
+}
 
 let tradeHistoryLog = JSON.parse(localStorage.getItem('ai_trade_history_v2')) || [];
 if (!Array.isArray(tradeHistoryLog)) tradeHistoryLog = [];
@@ -176,6 +196,12 @@ function updateCapitalDisplay() {
     const currencySymbols = { 'USDT': 'USDT', 'USD': 'USD', 'ARS': 'ARS' };
     const curSym = currencySymbols[currency] || '$';
     document.getElementById('capitalDisplay').innerText = `$${total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${curSym}`;
+    
+    // Actualizar comisiones acumuladas del broker
+    const feesDisp = document.getElementById('totalFeesDisplay');
+    if (feesDisp) {
+        feesDisp.innerText = `$${(portfolio.totalFeesPaid || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    }
     
     // Actualizar datos en el Modal de Tesorería
     const modalVault = document.getElementById('modalVaultUSD');
@@ -256,6 +282,20 @@ function updateCapitalDisplay() {
 symbolSelect.addEventListener('change', () => {
     currentSymbol = symbolSelect.value;
     logToTerminal(`Cambiando activo a ${currentSymbol}...`, 'warn');
+    
+    // Auto-ajustar sugerencia de broker fee según activo (si no está en modo personalizado)
+    const feeSelect = document.getElementById('brokerFeeSelect');
+    if (feeSelect && feeSelect.value !== 'custom') {
+        if (currentSymbol.includes('.BA')) {
+            feeSelect.value = "0.50";
+        } else if (!currentSymbol.includes('/')) {
+            feeSelect.value = "0.25";
+        } else {
+            feeSelect.value = "0.10";
+        }
+        updateBrokerFeeDisplay();
+    }
+    
     candleSeries.setData([]); // Limpiar gráfico
     smaSeries.setData([]);
     vwapSeries.setData([]);
@@ -429,7 +469,8 @@ agentToggle.addEventListener('click', () => {
                 
                 const macroContextText = document.getElementById('macroContext')?.value || '';
                 const sentScore = window.currentSentimentScore || 0;
-                const url = `${API_BASE_URL}/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}`;
+                const feeRate = getBrokerFeeRate();
+                const url = `${API_BASE_URL}/api/market/analysis?symbol=${currentSymbol}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&engine=${engine}&tp=${tpStr}&sl=${Math.abs(parseFloat(slStr))}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}&fee=${feeRate}`;
                 const response = await fetch(url);
                 const data = await response.json();
                 
@@ -438,7 +479,10 @@ agentToggle.addEventListener('click', () => {
                     if (data.signal === 'COMPRAR') logType = 'action';
                     if (data.signal === 'VENDER') logType = 'error';
                     
-                    logToTerminal(`[${data.signal}] RSI: ${data.indicators.rsi} | SMA20: ${data.indicators.sma_20}`, 'warn');
+                    const feeStr = data.fee_info ? ` | Fee Broker: ${data.fee_info.round_trip_fee}% ida/vuelta` : '';
+                    const rsiDisp = data.indicators?.rsi !== undefined && data.indicators?.rsi !== null ? data.indicators.rsi : '-';
+                    const smaDisp = data.indicators?.sma_20 !== undefined && data.indicators?.sma_20 !== null ? data.indicators.sma_20 : '-';
+                    logToTerminal(`[${data.signal}] RSI: ${rsiDisp} | SMA20: ${smaDisp}${feeStr}`, 'warn');
                     logToTerminal(`Razonamiento: ${data.reason}`, logType);
                     
                     // Lógica de Paper Trading & Copiloto
@@ -697,7 +741,7 @@ function renderTradeHistory() {
     });
 
     if (todaysTrades.length === 0) {
-        tbody.innerHTML = `<tr id="emptyHistoryRow"><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones registradas en el día de hoy.</td></tr>`;
+        tbody.innerHTML = `<tr id="emptyHistoryRow"><td colspan="7" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones registradas en el día de hoy.</td></tr>`;
         return;
     }
     
@@ -706,6 +750,7 @@ function renderTradeHistory() {
         if (trade.status === 'Ejecutada') statusClass = 'text-green-400 font-bold';
         if (trade.status === 'Rechazada') statusClass = 'text-red-400 font-bold';
         let typeClass = trade.signal === 'COMPRAR' ? 'text-green-500' : 'text-red-500';
+        const feeVal = trade.fee !== undefined ? trade.fee : 0;
         
         const tr = document.createElement('tr');
         tr.className = 'border-b border-gray-700/50 hover:bg-gray-700/20';
@@ -714,6 +759,7 @@ function renderTradeHistory() {
             <td class="px-4 py-2 font-bold">${trade.baseCoin}/USDT</td>
             <td class="px-4 py-2 ${typeClass}">${trade.signal}</td>
             <td class="px-4 py-2 font-mono">$${trade.price.toLocaleString()}</td>
+            <td class="px-4 py-2 font-mono text-yellow-400">$${feeVal.toFixed(2)}</td>
             <td class="px-4 py-2 ${statusClass}">${trade.status}</td>
             <td class="px-4 py-2 text-xs">${trade.mode}</td>
         `;
@@ -721,11 +767,11 @@ function renderTradeHistory() {
     });
 }
 
-function addTradeToHistory(signal, baseCoin, price, status, mode) {
+function addTradeToHistory(signal, baseCoin, price, status, mode, fee = 0) {
     const now = new Date();
     const timeString = now.toLocaleTimeString();
     const timestamp = now.toISOString();
-    tradeHistoryLog.unshift({ timeString, timestamp, signal, baseCoin, price, status, mode });
+    tradeHistoryLog.unshift({ timeString, timestamp, signal, baseCoin, price, status, mode, fee: Number(Number(fee).toFixed(2)) });
     
     // Guardar en persistencia local (navegador)
     localStorage.setItem('ai_trade_history_v2', JSON.stringify(tradeHistoryLog));
@@ -741,6 +787,7 @@ function addTradeToHistory(signal, baseCoin, price, status, mode) {
 }
 
 function executeTrade(signal, baseCoin, price, mode = 'Automático') {
+    const feeRate = getBrokerFeeRate();
     if (signal === 'COMPRAR') {
         // Gestión de Capital Dinámica
         const riskFactor = parseFloat(document.getElementById('riskSelect')?.value || "0.25");
@@ -753,24 +800,34 @@ function executeTrade(signal, baseCoin, price, mode = 'Automático') {
             return;
         }
 
-        const cantidadAComprar = tradeAmount / price;
+        // Deducción de Comisión del Broker en Compra
+        const feeAmount = tradeAmount * (feeRate / 100);
+        const capitalNeto = tradeAmount - feeAmount;
+        const cantidadAComprar = capitalNeto / price;
         
         // Promediar precio de entrada si el bot hace DCA (compras múltiples)
         const valorPrevio = portfolio.ASSET * portfolio.entryPrice;
         const valorNuevo = cantidadAComprar * price;
         
         portfolio.ASSET += cantidadAComprar;
-        portfolio.balances[currency] -= tradeAmount;
+        portfolio.balances[currency] -= tradeAmount; // Sale el tradeAmount completo (capital invertido + fee deducido)
         portfolio.entryPrice = (valorPrevio + valorNuevo) / portfolio.ASSET;
+        portfolio.totalFeesPaid = (portfolio.totalFeesPaid || 0) + feeAmount;
         
-        logToTerminal(`💰 SIMULACIÓN: COMPRADO ${cantidadAComprar.toFixed(4)} ${baseCoin} a $${price.toLocaleString()} (Inversión: $${tradeAmount.toFixed(2)})`, 'action');
+        logToTerminal(`💰 SIMULACIÓN: COMPRADO ${cantidadAComprar.toFixed(4)} ${baseCoin} a $${price.toLocaleString()} (Inversión: $${tradeAmount.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%])`, 'action');
+        addTradeToHistory(signal, baseCoin, price, 'Ejecutada', mode, feeAmount);
     } else if (signal === 'VENDER') {
-        const dolaresObtenidos = portfolio.ASSET * price;
+        const dolaresObtenidosBruto = portfolio.ASSET * price;
+        const feeAmount = dolaresObtenidosBruto * (feeRate / 100);
+        const dolaresNetos = dolaresObtenidosBruto - feeAmount;
+        
         const currency = getCurrency(currentSymbol);
-        portfolio.balances[currency] += dolaresObtenidos;
+        portfolio.balances[currency] += dolaresNetos;
         portfolio.ASSET = 0;
         portfolio.entryPrice = 0;
-        logToTerminal(`💵 SIMULACIÓN: VENDIDO ${baseCoin} a $${price.toLocaleString()}. Nuevo Saldo ${currency}: $${portfolio.balances[currency].toFixed(2)}`, 'error');
+        portfolio.totalFeesPaid = (portfolio.totalFeesPaid || 0) + feeAmount;
+        
+        logToTerminal(`💵 SIMULACIÓN: VENDIDO ${baseCoin} a $${price.toLocaleString()} (Bruto: $${dolaresObtenidosBruto.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%] | Neto: $${dolaresNetos.toFixed(2)}). Nuevo Saldo ${currency}: $${portfolio.balances[currency].toFixed(2)}`, 'error');
         
         // --- LÓGICA DE AUTO-ASEGURAR GANANCIAS ---
         const autoVaultToggle = document.getElementById('autoVaultToggle');
@@ -792,13 +849,13 @@ function executeTrade(signal, baseCoin, price, mode = 'Automático') {
                 logToTerminal(`🔒 AUTO-VAULT: Rentabilidad del ${profitPct.toFixed(2)}% alcanzada. Ganancia de $${profitToSweep.toFixed(2)} transferida a la Bóveda Segura.`, 'action');
             }
         }
+        addTradeToHistory(signal, baseCoin, price, 'Ejecutada', mode, feeAmount);
     }
     
     // Guardar en el navegador (Persistencia)
     localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     
     updateCapitalDisplay();
-    addTradeToHistory(signal, baseCoin, price, 'Ejecutada', mode);
 }
 
 let pendingTrade = null;
@@ -901,6 +958,26 @@ document.getElementById('riskSelect')?.addEventListener('change', () => {
 document.getElementById('tpSlSelect')?.addEventListener('change', () => {
     logToTerminal(`Límites de ganancia/pérdida actualizados a: ${document.getElementById('tpSlSelect').options[document.getElementById('tpSlSelect').selectedIndex].text}`, 'info');
 });
+
+const brokerFeeSelect = document.getElementById('brokerFeeSelect');
+const customFeeWrapper = document.getElementById('customFeeWrapper');
+const customFeeInput = document.getElementById('customFeeInput');
+
+brokerFeeSelect?.addEventListener('change', () => {
+    if (brokerFeeSelect.value === 'custom') {
+        customFeeWrapper?.classList.remove('hidden');
+    } else {
+        customFeeWrapper?.classList.add('hidden');
+    }
+    updateBrokerFeeDisplay();
+    logToTerminal(`Comisión del Broker fijada en: ${getBrokerFeeRate()}% por orden (Round-Trip: ${(getBrokerFeeRate() * 2).toFixed(2)}%)`, 'info');
+});
+
+customFeeInput?.addEventListener('input', () => {
+    updateBrokerFeeDisplay();
+});
+
+setTimeout(updateBrokerFeeDisplay, 300);
 
 function updateBrainBadge() {
     const engineSelect = document.getElementById('engineSelect');
@@ -1039,18 +1116,23 @@ function generarResumen() {
             if (!posicionesAbiertas[asst]) {
                 posicionesAbiertas[asst] = [];
             }
-            posicionesAbiertas[asst].push({ precioCompra: precio, timestamp: trade.timestamp, timeString: trade.timeString });
+            posicionesAbiertas[asst].push({ precioCompra: precio, timestamp: trade.timestamp, timeString: trade.timeString, fee: trade.fee || 0 });
         } else if (trade.signal === 'VENDER') {
             if (posicionesAbiertas[asst] && posicionesAbiertas[asst].length > 0) {
                 const compra = posicionesAbiertas[asst].shift();
-                const pnl = precio - compra.precioCompra;
-                const pnlPercent = (pnl / compra.precioCompra) * 100;
+                const feeVenta = trade.fee || 0;
+                const feeCompra = compra.fee || 0;
+                const feeTotalTrade = feeCompra + feeVenta;
+                const pnlBruto = precio - compra.precioCompra;
+                const pnlNeto = pnlBruto - feeTotalTrade;
+                const pnlPercent = (pnlNeto / compra.precioCompra) * 100;
                 
                 tradesCerrados.push({
                     activo: asst,
                     compra: compra.precioCompra,
                     venta: precio,
-                    pnl: pnl,
+                    feeTotal: feeTotalTrade,
+                    pnl: pnlNeto,
                     pnlPercent: pnlPercent,
                     timeStringCompra: compra.timeString,
                     timeStringVenta: trade.timeString,
@@ -1070,6 +1152,12 @@ function generarResumen() {
         if (t.pnl > 0) winTrades++;
         totalPnl += t.pnl;
         capitalInvertidoEstimado += t.compra; // Estimación simple
+    });
+    
+    // Sumar comisiones totales del periodo
+    let totalFeesPeriodo = 0;
+    tradesEnRango.forEach(t => {
+        totalFeesPeriodo += (t.fee || 0);
     });
     
     const winRate = totalTrades > 0 ? ((winTrades / totalTrades) * 100).toFixed(2) : 0;
@@ -1111,6 +1199,11 @@ function generarResumen() {
     elResultado.innerText = `${sign}${prefix}${Math.abs(resultadoNeto).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} ${currency}`;
     elResultado.className = `text-xl font-bold ${colorPnl}`;
     
+    const elFeesCard = document.getElementById('resComisionesBroker');
+    if (elFeesCard) {
+        elFeesCard.innerText = `$${totalFeesPeriodo.toFixed(2)}`;
+    }
+    
     const elPorcentaje = document.getElementById('resPorcentaje');
     elPorcentaje.innerText = `${sign}${rentabilidadGlobal}%`;
     elPorcentaje.className = `text-xl font-bold ${colorPnl}`;
@@ -1126,7 +1219,7 @@ function generarResumen() {
     tbody.innerHTML = '';
     
     if (tradesCerrados.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones de ciclo completo (Compra y Venta) en este periodo.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones de ciclo completo (Compra y Venta) en este periodo.</td></tr>`;
     } else {
         tradesCerrados.forEach(t => {
             const tr = document.createElement('tr');
@@ -1137,6 +1230,7 @@ function generarResumen() {
                 <td class="px-4 py-2 font-bold">${t.activo}</td>
                 <td class="px-4 py-2 text-gray-300">$${t.compra.toFixed(2)}</td>
                 <td class="px-4 py-2 text-gray-300">$${t.venta.toFixed(2)}</td>
+                <td class="px-4 py-2 font-mono text-yellow-400">$${t.feeTotal.toFixed(2)}</td>
                 <td class="px-4 py-2 font-bold ${colorTr}">${signTr}$${Math.abs(t.pnl).toFixed(2)} (${signTr}${t.pnlPercent.toFixed(2)}%)</td>
             `;
             tbody.appendChild(tr);

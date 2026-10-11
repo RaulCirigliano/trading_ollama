@@ -28,6 +28,7 @@ El proyecto sigue estándares modernos dividiendo claramente Cliente y Servidor 
   - [x] **Backend:** Crear el worker que extrae titulares y genera el análisis con LLMs. Implementar un "Buzón Persistente" local (JSON/SQLite) y la rutina de "Pre-Market Digest" para el despertar del Cerebro.
   - [ ] **Worker Automático (Cron):** Programar una tarea en segundo plano (ej. `APScheduler` o `asyncio`) para que el Agente escanee las noticias automáticamente cada X horas durante el fin de semana sin intervención del usuario.
 - [ ] **Desarrollo de Conector Real:** Vincular el Orquestador a la API transaccional de un broker real para implementar la arquitectura de Bóveda y Tesorería Just-In-Time.
+- [x] **Cálculo de Comisiones y Anti-Overtrading:** Incorporar el costo de comisiones del broker en los cálculos del Cerebro (Backend) y en el simulador de Paper Trading (Frontend) para prevenir el desgaste de capital por compras/ventas excesivas.
 - [ ] **Optimización del Modelo Ollama:** Perfeccionar el modelo local de IA (`trader-ia`) para hacerlo más eficiente leyendo gráficos y reducir la dependencia de la API externa de Gemini.
 
 
@@ -53,8 +54,12 @@ El objetivo principal es evitar que un error, bug o alucinación de la IA compro
 
 ### 6.2. Matemática Financiera y Comisiones
 La rentabilidad en *Paper Trading* no es real hasta que no se restan los costos del broker. La IA debe evaluar lo siguiente antes de autorizar cualquier trade:
-- **Estructura *Round-Trip*:** Restar por adelantado la comisión de entrada (compra) y salida (venta) según el modelo de tarifas del broker (Maker vs Taker).
-- **Filtro Anti Micro-Trading:** Regla dura en el Orquestador. La IA tiene PROHIBIDO ejecutar operaciones si el beneficio esperado (*Take Profit*) no supera holgadamente el costo total de comisiones y spread (diferencia Bid/Ask).
+- **Estructura *Round-Trip*:** Restar por adelantado la comisión de entrada (compra) y salida (venta) según el modelo de tarifas del broker (Maker vs Taker / tarifa porcentual por orden).
+- **Filtro Anti-Overtrading y Desgaste por Comisiones (Churning Protection):**
+  - El Cerebro (tanto los modelos de IA como el motor cuantitativo local) tiene **terminantemente prohibido** emitir señales de compra/venta frecuentes o re-entradas constantes si el rendimiento proyectado neto ($\Delta \text{Precio} - 2 \times \text{Comisión} - \text{Spread}$) es marginal o negativo.
+  - Cada decisión de compra debe validar un **Umbral Mínimo de Beneficio Neto (Fee Hurdle Rate)**: la ganancia esperada (Take Profit) debe superar con holgura el costo acumulado que cobra el broker en las dos puntas ($Fee_{\text{compra}} + Fee_{\text{venta}}$). De lo contrario, la orden se descarta automáticamente pasando a `MANTENER` con justificación explícita de inviabilidad por comisiones.
+- **Transparencia en Simulación (Paper Trading):**
+  - El simulador debe descontar la comisión del broker en cada ejecución simulada (tanto en compra como en venta), registrando el total acumulado en comisiones pagadas para alertar al usuario si una estrategia está desgastando la cuenta a favor del broker.
 - **Costos Overnight:** Si se usa margen o futuros, la IA debe descontar la tasa de fondeo diaria de la rentabilidad proyectada.
 
 ### 6.3. [Espacio Reservado para Futuras Directivas]

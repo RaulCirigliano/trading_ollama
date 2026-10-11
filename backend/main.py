@@ -337,13 +337,38 @@ def get_sentiment(symbol: str = "BTC/USDT", source: str = "coindesk"):
         return {"error": str(e)}
 
 @app.get("/api/market/analysis")
-def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = "local", tp: float = 3.0, sl: float = 2.0, risk: float = 1.0, sentiment: float = 0.0, macro: str = ""):
+def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = "local", tp: float = 3.0, sl: float = 2.0, risk: float = 1.0, sentiment: float = 0.0, macro: str = "", fee: float = 0.1):
     """
-    Realiza análisis técnico cuantitativo de las últimas velas.
+    Realiza análisis técnico cuantitativo de las últimas velas e incorpora
+    cálculo estricto de comisiones del broker y filtro anti-overtrading.
     """
     try:
         import pandas as pd
         import ta
+        
+        round_trip_fee = round(fee * 2.0, 3)
+        net_tp = round(tp - round_trip_fee, 2)
+        
+        # Filtro Primario Anti-Overtrading: si el Take Profit ni siquiera cubre las comisiones de ida y vuelta
+        if tp <= round_trip_fee:
+            return {
+                "symbol": symbol,
+                "signal": "MANTENER",
+                "reason": f"Filtro Anti-Overtrading: El TP (+{tp}%) no cubre el costo del broker (+{round_trip_fee}% ida/vuelta). Operación inviable.",
+                "fee_info": {
+                    "fee_per_order": fee,
+                    "round_trip_fee": round_trip_fee,
+                    "net_tp": net_tp,
+                    "viable": False
+                },
+                "indicators": {
+                    "rsi": None,
+                    "sma_20": None,
+                    "sma_50": None,
+                    "current_price": None
+                },
+                "latest_candle": None
+            }
         
         ohlcv = get_ohlcv(symbol, timeframe, 100)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -388,15 +413,19 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
 
         vwap_val = latest['vwap'] if not pd.isna(latest['vwap']) else price_val
         if engine == "local":
-            
-            
             cruce_alcista = (macd_prev < 0) and (macd_curr > 0)
             cruce_bajista = (macd_prev > 0) and (macd_curr < 0)
             
+            # Margen mínimo de viabilidad neta: el beneficio neto debe dejar al menos el equivalente a una comisión extra
+            viable_net = net_tp >= fee
+            
+            if not viable_net:
+                signal = "MANTENER"
+                reason = f"Rentabilidad neta insuficiente: Comisiones ({round_trip_fee}%) absorben la ganancia (Neto: +{net_tp}%)."
             # 1. Estrategia Tendencial (MACD + Filtro Institucional VWAP)
-            if cruce_alcista and (price_val > vwap_val) and rsi_val < 65:
+            elif cruce_alcista and (price_val > vwap_val) and rsi_val < 65:
                 signal = "COMPRAR"
-                reason = "MACD alcista respaldado por VWAP (Institucional)."
+                reason = f"MACD alcista + VWAP. Viable tras comisiones (Neto esperado: +{net_tp}%)."
             elif cruce_bajista and (price_val < vwap_val) and rsi_val > 35:
                 signal = "VENDER"
                 reason = "MACD bajista bajo resistencia VWAP."
@@ -404,10 +433,10 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
             # 2. Estrategia de Extremos / Rebote (Bollinger + RSI)
             elif price_val < bb_low and rsi_val < 30:
                 signal = "COMPRAR"
-                reason = "Pánico extremo: Precio bajo BB inf. Buscando rebote al VWAP."
+                reason = f"Pánico extremo bajo BB inf. Rebote cubre comisiones (Neto esperado: +{net_tp}%)."
             elif price_val > bb_high and rsi_val > 70:
                 signal = "VENDER"
-                reason = "Euforia: Precio sobre BB sup. Regreso a la media inminente."
+                reason = "Euforia sobre BB sup. Regreso a la media inminente."
                 
             else:
                 signal = "MANTENER"
@@ -432,7 +461,11 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
                     prompt = PromptTemplate.from_template(
                         "Eres un Senior Quantitative Trader Institucional operando algorítmicamente. "
                         "El usuario está en velas de {timeframe}, asumiendo un riesgo del {riesgo}%, "
-                        "buscando +{tp}% de ganancia y un límite de pérdida de -{sl}%.\n\n"
+                        "buscando +{tp}% de ganancia bruta (Take Profit) y un límite de pérdida de -{sl}%.\n\n"
+                        "COMISIONES Y COSTOS DEL BROKER:\n"
+                        "- Comisión por orden: {fee}%\n"
+                        "- Costo total ida y vuelta (Round-Trip): {round_trip}%\n"
+                        "- Ganancia neta proyectada si acierta: +{net_tp}%\n\n"
                         "ANALIZA LA ESTRUCTURA DEL ACTIVO {symbol}:\n"
                         "- Precio Actual: ${precio}\n"
                         "- VWAP (Institucional): ${vwap}\n"
@@ -441,7 +474,9 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
                         "- Bandas Bollinger: Inf=${bb_low}, Sup=${bb_high}\n"
                         "- Sentimiento del Mercado (Noticias): {sentiment} (-1 pánico a 1 euforia)\n"
                         "- Contexto Macro (Directiva del Humano): {macro}\n\n"
-                        "INSTRUCCIÓN CORE: Tu decisión debe basarse en el VWAP y el Contexto Macro. Si hay directiva humana, dale prioridad. Si Precio > VWAP es alcista, < VWAP es bajista. "
+                        "REGLA ESTRICTA ANTI-OVERTRADING Y MATEMÁTICA DE COMISIONES:\n"
+                        "Tienes terminantemente prohibido comprar o vender si el movimiento esperado no supera con holgura el costo de comisiones ({round_trip}%). Si el margen neto es estrecho o dudoso, responde obligatoriamente MANTENER para proteger el capital contra el desgaste de comisiones.\n"
+                        "Tu decisión debe basarse en el VWAP y el Contexto Macro. Si hay directiva humana, dale prioridad. Si Precio > VWAP es alcista, < VWAP es bajista. "
                         "Cruza esto con el RSI, las Bandas y el Sentimiento. "
                         "Tu respuesta debe ser EXCLUSIVAMENTE en formato JSON válido estricto sin markdown:\n"
                         '{"signal": "COMPRAR", "reason": "Justificación de 15 palabras."}'
@@ -453,6 +488,9 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
                         "riesgo": int(risk * 100),
                         "tp": tp,
                         "sl": sl,
+                        "fee": fee,
+                        "round_trip": round_trip_fee,
+                        "net_tp": net_tp,
                         "symbol": symbol,
                         "precio": price_val,
                         "vwap": round(latest['vwap'], 2) if not pd.isna(latest['vwap']) else "N/A",
@@ -480,7 +518,11 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
             
             prompt_text = f'''
             Eres un Senior Quantitative Trader Institucional operando algorítmicamente.
-            Mercado: {symbol}. Velas de {timeframe}. Riesgo: {int(risk * 100)}%. TP: +{tp}%. SL: -{sl}%.
+            Mercado: {symbol}. Velas de {timeframe}. Riesgo: {int(risk * 100)}%. TP Bruto: +{tp}%. SL: -{sl}%.
+            
+            COMISIONES DEL BROKER:
+            - Comisión por orden: {fee}% ({round_trip_fee}% ida y vuelta).
+            - Ganancia neta esperada: +{net_tp}%.
             
             DATOS TÉCNICOS Y CONTEXTO ACTUAL:
             - Precio: ${price_val}
@@ -490,6 +532,9 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
             - Bandas Bollinger: Inf=${round(bb_low, 2) if not pd.isna(bb_low) else "N/A"}, Sup=${round(bb_high, 2) if not pd.isna(bb_high) else "N/A"}
             - Sentimiento de Noticias: {sentiment} (-1 a 1)
             - Directiva Macro (Humano): {macro if macro else "Ninguna"}
+            
+            REGLA ESTRICTA ANTI-OVERTRADING:
+            No operes innecesariamente. Si el movimiento no garantiza superar holgadamente las comisiones del broker ({round_trip_fee}%), debes emitir [MANTENER] para evitar que el broker canibalice las ganancias.
             
             ANALIZA ESTOS DATOS PASO A PASO. (MANTÉN TU RAZONAMIENTO INTERNO MUY BREVE, MÁXIMO 2 PÁRRAFOS).
             Al final de tu respuesta, debes dar tu veredicto final usando OBLIGATORIAMENTE una de estas tres palabras entre corchetes:
@@ -529,7 +574,8 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
             
             prompt_text = f'''
             Eres un Senior Quantitative Trader Institucional operando algorítmicamente.
-            Mercado: {symbol}. Velas de {timeframe}. Riesgo: {int(risk * 100)}%. TP: +{tp}%. SL: -{sl}%.
+            Mercado: {symbol}. Velas de {timeframe}. Riesgo: {int(risk * 100)}%. TP Bruto: +{tp}%. SL: -{sl}%.
+            Comisión Broker: {fee}% por orden ({round_trip_fee}% ida y vuelta). Ganancia Neta Esperada: +{net_tp}%.
             
             DATOS TÉCNICOS Y CONTEXTO ACTUAL:
             - Precio: ${price_val}
@@ -539,6 +585,8 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
             - Bandas Bollinger: Inf=${round(bb_low, 2) if not pd.isna(bb_low) else "N/A"}, Sup=${round(bb_high, 2) if not pd.isna(bb_high) else "N/A"}
             - Sentimiento de Noticias: {sentiment} (-1 a 1)
             - Directiva Macro (Humano): {macro if macro else "Ninguna"}
+            
+            REGLA ANTI-OVERTRADING: Si el movimiento no cubre con holgura las comisiones ({round_trip_fee}%), descarta el trade eligiendo MANTENER.
             
             Responde EXCLUSIVAMENTE con este formato JSON y NADA MAS:
             {{"signal": "COMPRAR", "reason": "Justificacion breve combinando datos y contexto."}}
@@ -569,6 +617,12 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "1m", engine: str = 
             "symbol": symbol,
             "signal": signal,
             "reason": reason,
+            "fee_info": {
+                "fee_per_order": fee,
+                "round_trip_fee": round_trip_fee,
+                "net_tp": net_tp,
+                "viable": True
+            },
             "indicators": {
                 "rsi": round(latest['rsi'], 2) if not pd.isna(latest['rsi']) else None,
                 "sma_20": round(latest['sma_20'], 2) if not pd.isna(latest['sma_20']) else None,
