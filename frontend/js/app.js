@@ -649,13 +649,24 @@ function updateCapitalDisplay() {
 
     // Actualizar Tabla de Posiciones Activas
     const activeBody = document.getElementById('activePositionsBody');
+    const statusBadge = document.getElementById('posGracefulStatus');
     if (activeBody) {
         const currentPos = getOpenPosition();
         if (!currentPos) {
+            isStopAfterCloseArmed = false;
+            localStorage.removeItem('ai_stop_after_close');
+            if (statusBadge) statusBadge.classList.add('hidden');
             if (!document.getElementById('emptyPositionsRow')) {
                 activeBody.innerHTML = `<tr id="emptyPositionsRow"><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No tienes posiciones activas (100% liquidez en ${currency}).</td></tr>`;
             }
         } else {
+            if (statusBadge) {
+                if (isStopAfterCloseArmed) {
+                    statusBadge.classList.remove('hidden');
+                } else {
+                    statusBadge.classList.add('hidden');
+                }
+            }
             const isSameSymbol = (currentPos.symbol === currentSymbol);
             const activePrice = isSameSymbol ? currentPrice : (window.positionAssetPrice || currentPos.entryPrice);
             const pnlNoRealizado = (activePrice - currentPos.entryPrice) * currentPos.qty;
@@ -667,17 +678,32 @@ function updateCapitalDisplay() {
             if (!activeRow) {
                 activeBody.innerHTML = `
                     <tr id="activePositionRow" class="border-b border-gray-700/50 bg-blue-900/10">
-                        <td class="px-4 py-2 font-bold text-white" id="apCoin"></td>
-                        <td class="px-4 py-2 font-mono" id="apAmount"></td>
-                        <td class="px-4 py-2 font-mono" id="apEntry"></td>
-                        <td class="px-4 py-2 font-mono" id="apCurrent"></td>
-                        <td class="px-4 py-2 font-bold" id="apPnl"></td>
-                        <td class="px-4 py-2 text-right">
-                            <button onclick="window.forceClosePosition()" class="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold shadow-lg transition duration-200 ease-in-out transform hover:scale-105 border border-red-500">✖ CERRAR</button>
+                        <td class="px-2.5 py-2 font-bold text-white" id="apCoin"></td>
+                        <td class="px-2.5 py-2 font-mono" id="apAmount"></td>
+                        <td class="px-2.5 py-2 font-mono" id="apEntry"></td>
+                        <td class="px-2.5 py-2 font-mono" id="apCurrent"></td>
+                        <td class="px-2.5 py-2 font-bold" id="apPnl"></td>
+                        <td class="px-2.5 py-2 text-right whitespace-nowrap">
+                            <button id="btnStopAfterClose" onclick="window.toggleStopAfterClose()" class="text-xs px-2.5 py-1 rounded font-semibold transition mr-2"></button>
+                            <button onclick="window.forceClosePosition()" class="text-xs bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded font-bold shadow-lg transition duration-200 ease-in-out transform hover:scale-105 border border-red-500">✖ CERRAR</button>
                         </td>
                     </tr>
                 `;
             }
+
+            const btnSac = document.getElementById('btnStopAfterClose');
+            if (btnSac) {
+                if (isStopAfterCloseArmed) {
+                    btnSac.className = 'text-xs bg-yellow-500 hover:bg-yellow-400 text-black px-2 py-1 rounded font-bold transition mr-2 border border-yellow-300 shadow-[0_0_10px_rgba(234,179,8,0.5)] animate-pulse';
+                    btnSac.innerHTML = '⏹️ Parada Programada ACTIVA';
+                    btnSac.title = 'El agente se detendrá solo al cerrar este trade. Clic para cancelar.';
+                } else {
+                    btnSac.className = 'text-xs bg-gray-700 hover:bg-gray-600 text-yellow-400 px-2 py-1 rounded font-semibold transition mr-2 border border-gray-600 hover:border-yellow-500';
+                    btnSac.innerHTML = '⏹️ Detener al cerrar';
+                    btnSac.title = 'Deja que el trade madure hasta TP/SL y detén el agente automáticamente al vender.';
+                }
+            }
+
             const symbolIndicator = isSameSymbol 
                 ? `<span class="font-bold text-white">${escapeHtml(currentPos.baseCoin)}</span> <span class="text-[10px] text-gray-400">(${escapeHtml(currentPos.symbol)})</span>`
                 : `<span class="font-bold text-white">${escapeHtml(currentPos.baseCoin)}</span> <span class="text-[10px] text-yellow-400 bg-yellow-950/60 px-1.5 py-0.5 rounded border border-yellow-700/50">Segundo plano: ${escapeHtml(currentPos.symbol)}</span>`;
@@ -687,7 +713,7 @@ function updateCapitalDisplay() {
             document.getElementById('apCurrent').innerText = `$${activePrice.toLocaleString()}`;
             
             const pnlCell = document.getElementById('apPnl');
-            pnlCell.className = `px-4 py-2 font-bold ${pnlColor}`;
+            pnlCell.className = `px-2.5 py-2 font-bold ${pnlColor}`;
             pnlCell.innerText = `${pnlSign}$${Math.abs(pnlNoRealizado).toFixed(2)} (${pnlSign}${pnlPct.toFixed(2)}%)`;
         }
     }
@@ -865,6 +891,7 @@ let cycleStartedAt = 0; // Timestamp de inicio para watchdog
 let isExecutingTrade = false; // Mutex para evitar ejecuciones concurrentes de órdenes
 let lastHandledCandle = { symbol: '', candleTs: 0 };
 let copilotExpiryTimer = null;
+let isStopAfterCloseArmed = localStorage.getItem('ai_stop_after_close') === 'true'; // Graceful Shutdown post-trade
 
 function scheduleNext(delayMs) {
     if (simulateInterval) clearTimeout(simulateInterval);
@@ -1042,6 +1069,17 @@ const ejecutarAnalisis = async () => {
 
         const riskVal = document.getElementById('riskSelect')?.value || "0.25";
         const macroContextText = document.getElementById('macroContext')?.value || '';
+        
+        // Auto-detección de Apagado Programado en el prompt del trader
+        if (macroContextText && /deten(er|te|te\s+el\s+agente)?(\s+al|\s+tras|\s+despu[eé]s\s+de)\s+cerrar|stop\s+after\s+close/i.test(macroContextText)) {
+            if (!isStopAfterCloseArmed && hasPosition) {
+                isStopAfterCloseArmed = true;
+                localStorage.setItem('ai_stop_after_close', 'true');
+                logToTerminal(`🛑 [APAGADO PROGRAMADO] Detectada directiva en el prompt: El agente se detendrá automáticamente al cerrar ${targetSymbol}.`, 'action');
+                updateCapitalDisplay();
+            }
+        }
+
         const sentScore = window.currentSentimentScore || 0;
         const url = `${API_BASE_URL}/api/market/analysis?symbol=${encodeURIComponent(targetSymbol)}&timeframe=${tf}&engine=${engine}&tp=${tpVal}&sl=${slVal}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}&fee=${feeRate}&has_position=${hasPosition}&entry_price=${entryPrice}`;
         
@@ -1638,6 +1676,16 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
 
             logToTerminal(`💵 SIMULACIÓN: VENDIDO ${sellCoin} (${sellSymbol}) a $${execSellPrice.toLocaleString()} (Bruto: $${dolaresObtenidosBruto.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%] | Neto: $${dolaresNetos.toFixed(2)} | PnL: ${pnlNeto >= 0 ? '+' : ''}$${pnlNeto.toFixed(2)}). Saldo ${sellCurrency}: $${portfolio.balances[sellCurrency].toFixed(2)}`, 'error');
             
+            // Graceful Shutdown: Apagado programado post-cierre
+            if (isStopAfterCloseArmed) {
+                isStopAfterCloseArmed = false;
+                localStorage.removeItem('ai_stop_after_close');
+                if (isAgentActive) {
+                    stopAgent('post_trade_closure');
+                    logToTerminal(`🛡️ [APAGADO PROGRAMADO] Posición en ${sellSymbol} cerrada con éxito. Agente detenido automáticamente como ordenaste.`, 'action');
+                }
+            }
+            
             // --- LÓGICA DE AUTO-ASEGURAR GANANCIAS ---
             const autoVaultToggle = document.getElementById('autoVaultToggle');
             if (autoVaultToggle && autoVaultToggle.checked && portfolio.deposits[sellCurrency] > 0) {
@@ -1857,6 +1905,24 @@ window.forceClosePosition = function() {
     } else {
         logToTerminal(`ℹ️ No hay posición abierta que cerrar.`, 'info');
     }
+};
+
+// Control de Apagado Programado (Graceful Shutdown)
+window.toggleStopAfterClose = function() {
+    const pos = getOpenPosition();
+    if (!pos) {
+        logToTerminal('ℹ️ No hay posición abierta sobre la cual programar el apagado.', 'info');
+        return;
+    }
+    isStopAfterCloseArmed = !isStopAfterCloseArmed;
+    if (isStopAfterCloseArmed) {
+        localStorage.setItem('ai_stop_after_close', 'true');
+        logToTerminal(`🛑 [APAGADO PROGRAMADO] Activado: El agente gestionará la salida óptima de ${pos.symbol} (TP/Breakeven/Trailing/SL) y se detendrá automáticamente al cerrar el trade.`, 'action');
+    } else {
+        localStorage.removeItem('ai_stop_after_close');
+        logToTerminal(`ℹ️ [APAGADO PROGRAMADO] Cancelado: El agente continuará operando normalmente tras el cierre de ${pos.symbol}.`, 'info');
+    }
+    updateCapitalDisplay();
 };
 
 // Al cargar la página, restaurar el historial visual
