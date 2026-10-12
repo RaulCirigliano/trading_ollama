@@ -172,9 +172,13 @@ function getCurrency(symbol) {
 // Helpers de Única Fuente de Verdad para la Posición (Bloque 1)
 function getOpenPosition() {
     if (portfolio.position && typeof portfolio.position.qty === 'number' && portfolio.position.qty > 0.0001) {
-        // Migración a convención stopNetPct firmado neto (R1)
+        // Migración a convención stopNetPct firmado neto (Bloque 1)
         if (portfolio.position.stopNetPct === undefined || portfolio.position.stopNetPct === null) {
-            portfolio.position.stopNetPct = -(portfolio.position.slEffPct ?? portfolio.position.sl ?? 1.0);
+            if (portfolio.position.beArmed) {
+                portfolio.position.stopNetPct = Math.max(-Math.abs(portfolio.position.slEffPct ?? portfolio.position.sl ?? 1.0), +0.05);
+            } else {
+                portfolio.position.stopNetPct = -Math.abs(portfolio.position.slEffPct ?? portfolio.position.sl ?? 1.0);
+            }
             delete portfolio.position.slEffPct;
         }
         return portfolio.position;
@@ -189,9 +193,10 @@ function hasOpenPosition() {
 // Matemática unificada de PnL y salida neta (R1)
 function netPctAtPrice(pos, price, feeRate) {
     if (!pos || !Number.isFinite(price) || price <= 0) return 0;
+    const effectiveFeeRate = (pos && typeof pos.feeRate === 'number') ? pos.feeRate : (feeRate !== undefined ? feeRate : getBrokerFeeRate());
     const costBasis = pos.costBasis || (pos.qty * pos.entryPrice);
     if (!costBasis || costBasis <= 0) return 0;
-    const netExitValue = pos.qty * price * (1 - (feeRate / 100));
+    const netExitValue = pos.qty * price * (1 - (effectiveFeeRate / 100));
     return ((netExitValue - costBasis) / costBasis) * 100;
 }
 
@@ -205,6 +210,7 @@ window.testRiskMath = function() {
         qty: capitalNeto / 100, // 0.999
         entryPrice: 100,
         costBasis: tradeAmount, // 100
+        feeRate: feeRate,
         tp: 1.5,
         sl: 1.0,
         stopNetPct: -1.0,
@@ -275,6 +281,8 @@ window.positionAssetPrice = null;
 window.positionAssetPriceTs = 0;
 let riskTickInFlight = false;
 let riskFeedFailures = 0;
+let staleFeedStartTime = 0; // ms: inicio de periodo estancado con mercado abierto
+let lastMarketClosedLoggedSymbol = ''; // Símbolo para registrar una sola vez aviso de mercado cerrado
 let lastRiskStaleLogTs = 0; // ms
 let lastRiskFailAlarmTs = 0; // ms
 let lastRiskCatchLogTs = 0; // ms
@@ -285,6 +293,7 @@ async function riskTick() {
     const pos = getOpenPosition();
     if (!pos) {
         riskFeedFailures = 0;
+        staleFeedStartTime = 0;
         return;
     }
     if (isExecutingTrade) return;
@@ -306,31 +315,71 @@ async function riskTick() {
         }
 
         const data = await res.json();
+
+        // 3. riskTick: tras el await del fetch y antes de evaluar, si getOpenPosition() !== pos, abortar el tick
+        const currentPos = getOpenPosition();
+        if (!currentPos || currentPos !== pos) {
+            return;
+        }
+
         const price = Number(data.price);
         if (!Number.isFinite(price) || price <= 0) {
             riskFeedFailures++;
             throw new Error(`Precio inválido recibido: ${data?.price}`);
         }
 
-        // Éxito: registrar precio y resetear contador de fallos
-        riskFeedFailures = 0;
-        window.positionAssetPrice = price;
-        const tsRaw = data.ts;
-        window.positionAssetPriceTs = (typeof tsRaw === 'number' && tsRaw > 1e11) ? tsRaw : ((typeof tsRaw === 'number' && tsRaw > 0) ? tsRaw * 1000 : Date.now());
+        // 1. Detección de mercado abierto y umbral por activo (20s cripto, 150s Yahoo)
+        const thresholdSec = (typeof data.stale_threshold_s === 'number') ? data.stale_threshold_s : (pos.symbol.includes('/') ? 20 : 150);
+        const isMarketOpen = (data.market_open !== undefined) ? Boolean(data.market_open) : (data.quote_age_s !== undefined ? data.quote_age_s < 900 : true);
 
-        // Verificación estricta de frescura en ms (umbral 20s = 20000ms)
-        const nowMs = Date.now();
-        const ageMs = nowMs - window.positionAssetPriceTs;
-        if (ageMs > 20000) {
-            if (nowMs - lastRiskStaleLogTs > 60000) {
-                logToTerminal(`⚠️ [RIESGO] SL SIN PRECIO FRESCO (${pos.symbol}, latencia ${(ageMs / 1000).toFixed(1)}s). Monitoreo pausado para evitar falsos cierres.`, 'warn');
-                lastRiskStaleLogTs = nowMs;
+        // 2. Si market_open es false, loguear UNA vez y no contarlo como falla
+        if (!isMarketOpen) {
+            if (lastMarketClosedLoggedSymbol !== pos.symbol) {
+                logToTerminal(`⏸️ [MERCADO CERRADO] Mercado cerrado para ${pos.symbol}. SL en pausa hasta reapertura.`, 'info');
+                lastMarketClosedLoggedSymbol = pos.symbol;
             }
-            return; // NO evaluar con entryPrice si no está fresco
+            riskFeedFailures = 0;
+            staleFeedStartTime = 0;
+            return;
         }
 
+        // Si el mercado está abierto, resetear aviso de mercado cerrado
+        lastMarketClosedLoggedSymbol = '';
+
+        // 3. Comprobación de frescura usando quote_age_s
+        const nowMs = Date.now();
+        const quoteAgeSec = (typeof data.quote_age_s === 'number') ? data.quote_age_s : Math.max(0, Math.floor((nowMs - (data.ts || nowMs)) / 1000));
+        const isStale = quoteAgeSec > thresholdSec;
+
+        if (isStale) {
+            // Contar tiempo estancado con mercado abierto y emitir alarma crítica tras 5 minutos (300s)
+            if (!staleFeedStartTime) staleFeedStartTime = nowMs;
+            const staleElapsedSec = Math.floor((nowMs - staleFeedStartTime) / 1000);
+
+            if (nowMs - lastRiskStaleLogTs > 60000) {
+                if (data.feed_delayed) {
+                    logToTerminal(`⚠️ [FEED CON DELAY] Feed con delay para ${pos.symbol} (latencia ${quoteAgeSec}s > umbral ${thresholdSec}s). Monitoreo pausado.`, 'warn');
+                } else {
+                    logToTerminal(`⚠️ [RIESGO] SL SIN PRECIO FRESCO (${pos.symbol}, latencia ${quoteAgeSec}s > umbral ${thresholdSec}s). Monitoreo pausado para evitar falsos cierres.`, 'warn');
+                }
+                lastRiskStaleLogTs = nowMs;
+            }
+
+            if (staleElapsedSec >= 300 && (nowMs - lastRiskFailAlarmTs > 30000)) {
+                logToTerminal(`🚨 [ALARMA CRÍTICA] Feed estancado durante ${(staleElapsedSec / 60).toFixed(1)} min con mercado abierto para ${pos.symbol}. Considera cerrar manualmente la posición.`, 'error');
+                lastRiskFailAlarmTs = nowMs;
+            }
+            return; // NO evaluar con entryPrice ni publicar precio si no está fresco
+        }
+
+        // 4. Publicar window.positionAssetPrice SOLO si el dato es fresco
+        riskFeedFailures = 0;
+        staleFeedStartTime = 0;
+        window.positionAssetPrice = price;
+        window.positionAssetPriceTs = nowMs - (quoteAgeSec * 1000);
+
         const evalPrice = window.positionAssetPrice;
-        const feeRate = getBrokerFeeRate();
+        const feeRate = (pos && typeof pos.feeRate === 'number') ? pos.feeRate : getBrokerFeeRate();
         const pnlNetPct = netPctAtPrice(pos, evalPrice, feeRate);
 
         if (typeof pos.peakPrice !== 'number' || pos.peakPrice <= 0) pos.peakPrice = pos.entryPrice;
@@ -379,9 +428,9 @@ async function riskTick() {
             if (pos.stopNetPct < 0) {
                 exitReason = 'Stop Loss';
             } else if (pos.beArmed && pos.stopNetPct < 0.5 && !pos.trailActive) {
-                exitReason = 'Breakeven Stop';
+                exitReason = 'Breakeven';
             } else {
-                exitReason = 'Trailing Stop';
+                exitReason = 'Trailing';
             }
             logToTerminal(`⚠️ AGENTE DE RIESGO: ${exitReason} disparado en ${pos.symbol} (${pnlNetPct.toFixed(2)}% neto vs umbral ${pos.stopNetPct >= 0 ? '+' : ''}${pos.stopNetPct.toFixed(2)}% neto). Vendiendo para proteger capital.`, 'error');
             executeTrade('VENDER', pos.symbol, pos.baseCoin, evalPrice, exitReason);
@@ -463,13 +512,16 @@ function getRiskState() {
             if (openPos && (openPos.currency === currency || getCurrency(openPos.symbol) === currency)) {
                 equity += (openPos.costBasis || (openPos.qty * openPos.entryPrice));
             }
-            if (equity <= 0) equity = 100; // Equity base defensivo
+            
+            const isPlaceholder = (equity <= 0);
+            const startEquity = isPlaceholder ? (currency === 'ARS' ? 0 : 100) : equity;
 
             state.books[currency] = {
                 dayKey: today,
-                startEquity: equity,
+                startEquity: startEquity,
                 realizedPnl: 0,
-                consecLosses: 0
+                consecLosses: 0,
+                placeholder: isPlaceholder
             };
         }
     });
@@ -495,16 +547,31 @@ function recordTradeInCircuitBreaker(pnlNeto, currency) {
     
     if (!state.books[cur] || state.books[cur].dayKey !== today) {
         let equity = (portfolio.balances && portfolio.balances[cur]) || 0;
-        if (equity <= 0) equity = 100;
+        const isPlaceholder = (equity <= 0);
         state.books[cur] = {
             dayKey: today,
-            startEquity: equity,
+            startEquity: isPlaceholder ? (cur === 'ARS' ? 0 : 100) : equity,
             realizedPnl: 0,
-            consecLosses: 0
+            consecLosses: 0,
+            placeholder: isPlaceholder
         };
     }
 
     const book = state.books[cur];
+
+    // Si el libro tiene placeholder:true (primer trade con balance originalmente 0), recalcular startEquity con el equity real previo al trade
+    if (book.placeholder) {
+        const currentBal = (portfolio.balances && portfolio.balances[cur]) || 0;
+        const realPriorEquity = currentBal - pnlNeto;
+        if (realPriorEquity > 0) {
+            book.startEquity = realPriorEquity;
+            book.placeholder = false;
+        } else if (currentBal > 0) {
+            book.startEquity = currentBal;
+            book.placeholder = false;
+        }
+    }
+
     book.realizedPnl = (book.realizedPnl || 0) + pnlNeto;
     if (pnlNeto < 0) {
         book.consecLosses = (book.consecLosses || 0) + 1;
@@ -521,9 +588,9 @@ function recordTradeInCircuitBreaker(pnlNeto, currency) {
     }
 
     // 2. Regla Drawdown diario <= -3% en el libro específico
-    const startEq = book.startEquity || 100;
-    const drawdownPct = (book.realizedPnl / startEq) * 100;
-    if (drawdownPct <= -3.0) {
+    const startEq = book.startEquity || (cur === 'ARS' ? 0 : 100);
+    const drawdownPct = startEq > 0 ? ((book.realizedPnl / startEq) * 100) : 0;
+    if (startEq > 0 && drawdownPct <= -3.0) {
         state.haltedUntil = Date.now() + 24 * 60 * 60 * 1000;
         state.haltReason = `Drawdown diario <= -3% en libro ${cur} (${drawdownPct.toFixed(2)}%)`;
         logToTerminal(`🛑 [CIRCUIT BREAKER] Drawdown diario del 3% alcanzado en libro ${cur} (${drawdownPct.toFixed(2)}% PnL: $${book.realizedPnl.toFixed(2)} vs equity inicial $${startEq.toFixed(2)}). Trading pausado 24h.`, 'error');
@@ -546,7 +613,6 @@ window.resetCircuitBreaker = function() {
     });
     saveRiskState(state);
     logToTerminal(`🔄 [CIRCUIT BREAKER] Reset manual aplicado por el operador. Límites restaurados.`, 'action');
-    addTradeToHistory('RESET', currentSymbol, 'ALL', 0, 'Reset CB', 'Manual', 0, 0);
 };
 
 function getBrokerFeeRate() {
@@ -799,6 +865,23 @@ window.ejecutarTransferencia = function() {
     portfolio.balances[destWallet] += amount;
     portfolio.deposits[destWallet] += amount; // Registrar la base para calcular ganancias limpias
     
+    // Al primer fondeo con placeholder, recalcular startEquity; si no-placeholder, ajustar startEquity en el mismo monto
+    const rState = getRiskState();
+    if (rState.books && rState.books[destWallet]) {
+        if (rState.books[destWallet].placeholder) {
+            let actualEquity = portfolio.balances[destWallet] || 0;
+            const openPos = getOpenPosition();
+            if (openPos && (openPos.currency === destWallet || getCurrency(openPos.symbol) === destWallet)) {
+                actualEquity += (openPos.costBasis || (openPos.qty * openPos.entryPrice));
+            }
+            rState.books[destWallet].startEquity = actualEquity;
+            rState.books[destWallet].placeholder = false;
+        } else {
+            rState.books[destWallet].startEquity = (rState.books[destWallet].startEquity || 0) + amount;
+        }
+        saveRiskState(rState);
+    }
+
     localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     updateCapitalDisplay();
     document.getElementById('tesoreriaModal').classList.add('hidden');
@@ -813,6 +896,10 @@ window.sweepBackAll = function() {
         return;
     }
     
+    const sweptUSD = portfolio.balances.USD || 0;
+    const sweptUSDT = portfolio.balances.USDT || 0;
+    const sweptARS = portfolio.balances.ARS || 0;
+
     // Regresar USD y USDT 1 a 1
     portfolio.VAULT += portfolio.balances.USD;
     portfolio.VAULT += portfolio.balances.USDT;
@@ -827,6 +914,21 @@ window.sweepBackAll = function() {
     portfolio.deposits.USD = 0;
     portfolio.deposits.USDT = 0;
     portfolio.deposits.ARS = 0;
+
+    // Ajustar startEquity del Circuit Breaker al retirar capital
+    const rState = getRiskState();
+    if (rState.books) {
+        if (rState.books.USD && !rState.books.USD.placeholder) {
+            rState.books.USD.startEquity = Math.max(0, (rState.books.USD.startEquity || 0) - sweptUSD);
+        }
+        if (rState.books.USDT && !rState.books.USDT.placeholder) {
+            rState.books.USDT.startEquity = Math.max(0, (rState.books.USDT.startEquity || 0) - sweptUSDT);
+        }
+        if (rState.books.ARS && !rState.books.ARS.placeholder) {
+            rState.books.ARS.startEquity = Math.max(0, (rState.books.ARS.startEquity || 0) - sweptARS);
+        }
+        saveRiskState(rState);
+    }
     
     localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     updateCapitalDisplay();
@@ -1222,6 +1324,7 @@ const ejecutarAnalisis = async () => {
 
 // Ciclo de Gráfico en Vivo (Cada 2 segundos) aislado exclusivamente para renderizado visual (Bloque 2)
 let chartInFlight = false;
+let lastChartErrorLogTs = 0;
 setInterval(async () => {
     const lobby = document.getElementById("lobbyView");
     if (lobby && !lobby.classList.contains("hidden")) return;
@@ -1230,7 +1333,14 @@ setInterval(async () => {
     const reqSymbol = currentSymbol;
     try {
         const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${encodeURIComponent(reqSymbol)}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&limit=60`);
-        if (!response.ok) return;
+        if (!response.ok) {
+            const now = Date.now();
+            if (now - lastChartErrorLogTs > 30000) {
+                logToTerminal(`⚠️ [GRÁFICO] Error actualizando velas de ${reqSymbol}: HTTP ${response.status}`, 'warn');
+                lastChartErrorLogTs = now;
+            }
+            return;
+        }
         const data = await response.json();
         if (reqSymbol !== currentSymbol) return; // Descartar respuesta tardía si el usuario cambió de símbolo
         
@@ -1259,7 +1369,11 @@ setInterval(async () => {
             updateCapitalDisplay();
         }
     } catch (err) {
-        // Silencioso: fallo aislado en renderizado del gráfico
+        const now = Date.now();
+        if (now - lastChartErrorLogTs > 30000) {
+            logToTerminal(`⚠️ [GRÁFICO] Fallo en renderizado de velas para ${reqSymbol}: ${err.message}`, 'warn');
+            lastChartErrorLogTs = now;
+        }
     } finally {
         chartInFlight = false;
     }
@@ -1732,6 +1846,7 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
                 qty: cantidadAComprar,
                 entryPrice: price,
                 costBasis: tradeAmount,
+                feeRate: feeRate, // Guardar pos.feeRate al abrir la posición
                 tp: tpLimit,
                 sl: slLimit,
                 stopNetPct: -slLimit, // R1: stop neto firmado (ej. -1.0)
@@ -1761,14 +1876,17 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
             const sellCoin = pos.baseCoin;
             const sellCurrency = pos.currency || getCurrency(sellSymbol);
             const posQty = pos.qty;
+            const feeRate = (pos && typeof pos.feeRate === 'number') ? pos.feeRate : getBrokerFeeRate();
 
-            // Validación de frescura en milisegundos para ventas si no está en pantalla (R2 item 3)
+            // Validación de frescura en milisegundos para ventas si no está en pantalla (Bloque 1 y 2)
             let execSellPrice = price;
-            if (sellSymbol !== currentSymbol && mode !== 'Stop Loss' && mode !== 'Take Profit') {
+            const isAutomaticRiskExit = ['Stop Loss', 'Breakeven', 'Breakeven Stop', 'Trailing', 'Trailing Stop', 'Take Profit'].includes(mode);
+            if (sellSymbol !== currentSymbol && !isAutomaticRiskExit) {
                 const nowMs = Date.now();
                 const ageMs = nowMs - (window.positionAssetPriceTs || 0);
-                if (!window.positionAssetPrice || ageMs > 15000) {
-                    logToTerminal(`⚠️ [VENTA ABORTADA] No hay precio fresco (< 15s) de segundo plano para ${sellSymbol}. Cambia al activo en pantalla o espera respuesta del feed.`, 'error');
+                const thresholdMs = sellSymbol.includes('/') ? 20000 : 150000;
+                if (!window.positionAssetPrice || ageMs > thresholdMs) {
+                    logToTerminal(`⚠️ [VENTA ABORTADA] No hay precio fresco (< ${thresholdMs / 1000}s) de segundo plano para ${sellSymbol}. Cambia al activo en pantalla o espera respuesta del feed.`, 'error');
                     return;
                 }
                 execSellPrice = window.positionAssetPrice;
@@ -1827,6 +1945,13 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
                         portfolio.VAULT += (profitToSweep / 1000.00);
                     } else {
                         portfolio.VAULT += profitToSweep;
+                    }
+
+                    // Ajustar startEquity del Circuit Breaker al retirar ganancias a la Bóveda
+                    const rState = getRiskState();
+                    if (rState.books && rState.books[sellCurrency] && !rState.books[sellCurrency].placeholder) {
+                        rState.books[sellCurrency].startEquity = Math.max(0, (rState.books[sellCurrency].startEquity || 0) - profitToSweep);
+                        saveRiskState(rState);
                     }
                     
                     logToTerminal(`🔒 AUTO-VAULT: Rentabilidad del ${profitPct.toFixed(2)}% alcanzada. Ganancia de $${profitToSweep.toFixed(2)} transferida a la Bóveda Segura.`, 'action');
@@ -1896,6 +2021,14 @@ document.getElementById('btnReject').addEventListener('click', () => {
         if (pendingTrade.candleTs > 0) {
             lastHandledCandle = { symbol: pendingTrade.symbol, candleTs: pendingTrade.candleTs };
         }
+        // Cooldown tras rechazar para no reabrir el modal inmediatamente (Bloque 4)
+        const tfSecMap = { '1m': 60, '5m': 300, '15m': 900 };
+        const tfVal = document.getElementById('timeframeSelect')?.value || '1m';
+        const tfSec = tfSecMap[tfVal] || 60;
+        const cooldownMs = Math.max(300000, 3 * tfSec * 1000);
+        const cooldownUntil = Date.now() + cooldownMs;
+        localStorage.setItem('ai_cooldown_v1', String(cooldownUntil));
+        logToTerminal(`⏳ [COOLDOWN INICIADO] Pausa de ${(cooldownMs / 60000).toFixed(1)} min tras rechazar operación.`, 'info');
         pendingTrade = null;
     }
     copilotState = 'idle';
@@ -1971,8 +2104,9 @@ document.getElementById('btnApprove').addEventListener('click', () => {
             }
             if (tradeSymbol !== currentSymbol) {
                 const ageMs = Date.now() - (window.positionAssetPriceTs || 0);
-                if (!window.positionAssetPrice || ageMs > 15000) {
-                    logToTerminal(`⚠️ [APROBACIÓN ABORTADA] No hay precio fresco (<15s) para vender ${tradeSymbol}. Espera respuesta del feed de fondo.`, 'error');
+                const thresholdMs = tradeSymbol.includes('/') ? 20000 : 150000;
+                if (!window.positionAssetPrice || ageMs > thresholdMs) {
+                    logToTerminal(`⚠️ [APROBACIÓN ABORTADA] No hay precio fresco (< ${thresholdMs / 1000}s) para vender ${tradeSymbol}. Espera respuesta del feed de fondo.`, 'error');
                     if (candleTs > 0) lastHandledCandle = { symbol: tradeSymbol, candleTs };
                     pendingTrade = null;
                     copilotState = 'idle';
@@ -2062,6 +2196,24 @@ window.inyectarCapital = function(amount) {
     const cur = getCurrency(currentSymbol);
     portfolio.balances[cur] += amount;
     portfolio.deposits[cur] = (portfolio.deposits[cur] || 0) + amount;
+    
+    // Al primer fondeo con placeholder, recalcular startEquity; si no-placeholder, ajustar startEquity en el mismo monto
+    const rState = getRiskState();
+    if (rState.books && rState.books[cur]) {
+        if (rState.books[cur].placeholder) {
+            let actualEquity = portfolio.balances[cur] || 0;
+            const openPos = getOpenPosition();
+            if (openPos && (openPos.currency === cur || getCurrency(openPos.symbol) === cur)) {
+                actualEquity += (openPos.costBasis || (openPos.qty * openPos.entryPrice));
+            }
+            rState.books[cur].startEquity = actualEquity;
+            rState.books[cur].placeholder = false;
+        } else {
+            rState.books[cur].startEquity = (rState.books[cur].startEquity || 0) + amount;
+        }
+        saveRiskState(rState);
+    }
+
     localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
     logToTerminal(`💸 DEPÓSITO: Se han inyectado $${amount} ${cur} de liquidez a la billetera operativa.`, 'action');
     updateCapitalDisplay();
@@ -2480,20 +2632,80 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // --- PRE-MARKET DIGEST LOGIC ---
+let premarketAbortController = null;
+
+async function abortPremarketProcess(source = 'lobby') {
+    if (premarketAbortController) {
+        try {
+            premarketAbortController.abort();
+        } catch (_) {}
+        premarketAbortController = null;
+    }
+    logToTerminal("🛑 Abortando consulta Pre-Market y liberando memoria RAM...", "warn");
+    
+    document.getElementById("btnCancelLobbyPremarket")?.classList.add("hidden");
+    document.getElementById("btnCancelPremarket")?.classList.add("hidden");
+
+    const btnLobby = document.getElementById("btnLobbyPremarket");
+    if (btnLobby) {
+        btnLobby.innerHTML = '<span class="animate-pulse">🧠</span> Generar Consenso del Cerebro';
+        btnLobby.disabled = false;
+    }
+    const btnPremkt = document.getElementById("btnPremarket");
+    if (btnPremkt) {
+        btnPremkt.innerText = "Despertar Cerebro (Pre-Market)";
+        btnPremkt.disabled = false;
+    }
+
+    const lobbyReportBox = document.getElementById("lobbyReportBox");
+    if (lobbyReportBox && source === 'lobby') {
+        lobbyReportBox.innerHTML = '<span class="text-red-400 font-bold">🛑 Cancelando proceso y liberando memoria RAM...</span>';
+    }
+
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/macro/premarket/cancel`, { method: "POST" });
+        const data = await res.json();
+        logToTerminal(`✅ Pre-Market: ${data.message || 'Memoria RAM liberada'}`, "success");
+        if (lobbyReportBox && source === 'lobby') {
+            lobbyReportBox.innerHTML = '<span class="text-yellow-400 font-bold">✅ Proceso cancelado. Memoria RAM liberada y modelos descargados con éxito.</span>';
+        }
+    } catch (e) {
+        logToTerminal(`Aviso al cancelar Pre-Market: ${e.message}`, "warn");
+    }
+}
+
+const btnCancelPremarket = document.getElementById("btnCancelPremarket");
+if (btnCancelPremarket) {
+    btnCancelPremarket.addEventListener("click", () => abortPremarketProcess('trench'));
+}
+
 const btnPremarket = document.getElementById("btnPremarket");
 if (btnPremarket) {
     btnPremarket.addEventListener("click", async () => {
         btnPremarket.innerText = "Analizando buzón...";
         btnPremarket.disabled = true;
         
+        const btnCancel = document.getElementById("btnCancelPremarket");
+        if (btnCancel) btnCancel.classList.remove("hidden");
+        
+        premarketAbortController = new AbortController();
         const engine = document.getElementById("aiEngineSelect")?.value || document.getElementById("engineSelect")?.value || "ollama";
         
         logToTerminal("Iniciando secuencia de Despertar Pre-Market...", "info");
         
         try {
-            const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`);
+            const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`, {
+                signal: premarketAbortController.signal
+            });
             const data = await res.json();
             
+            if (data.status === "cancelled") {
+                logToTerminal("Pre-Market: Operación cancelada por el usuario.", "warn");
+                btnPremarket.innerText = "Cancelado";
+                setTimeout(() => { btnPremarket.innerText = "Despertar Cerebro (Pre-Market)"; btnPremarket.disabled = false; }, 3000);
+                return;
+            }
+
             if (data.status === "error") {
                 logToTerminal(`Error Pre-Market: ${data.message}`, "error");
                 btnPremarket.innerText = "Error";
@@ -2530,15 +2742,26 @@ if (btnPremarket) {
             }, 5000);
             
         } catch (e) {
+            if (e.name === 'AbortError') {
+                logToTerminal("Consulta Pre-Market cancelada.", "warn");
+                return;
+            }
             logToTerminal(`Error de red al consultar Pre-Market: ${e.message}`, "error");
             btnPremarket.innerText = "Despertar Cerebro (Pre-Market)";
             btnPremarket.disabled = false;
+        } finally {
+            if (btnCancel) btnCancel.classList.add("hidden");
+            premarketAbortController = null;
         }
     });
 }
 // Mostrar el botón si el toggle de inversiones está activado
-// removed redeclaration
 if (investmentToggle && btnPremarket) {
+    if (investmentToggle.checked) {
+        btnPremarket.classList.remove("hidden");
+    } else {
+        btnPremarket.classList.add("hidden");
+    }
     investmentToggle.addEventListener("change", (e) => {
         if (e.target.checked) {
             btnPremarket.classList.remove("hidden");
@@ -2567,21 +2790,33 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     
+    const btnCancelLobby = document.getElementById("btnCancelLobbyPremarket");
+    if (btnCancelLobby) {
+        btnCancelLobby.addEventListener("click", () => abortPremarketProcess('lobby'));
+    }
+
     if (btnLobbyPremarket) {
         btnLobbyPremarket.addEventListener("click", async () => {
             btnLobbyPremarket.innerHTML = '<span class="animate-spin">🔄</span> Consultando al Cerebro...';
             btnLobbyPremarket.disabled = true;
+            if (btnCancelLobby) btnCancelLobby.classList.remove("hidden");
+            
+            premarketAbortController = new AbortController();
             const lobbyEngineEl = document.getElementById("lobbyEngineSelect");
             const engine = lobbyEngineEl?.value || "deepseek";
             const engineName = lobbyEngineEl?.options[lobbyEngineEl.selectedIndex]?.text || engine;
             lobbyReportBox.classList.remove("hidden");
-            lobbyReportBox.innerHTML = `<span class="text-yellow-400">Consultando a <strong>${escapeHtml(engineName)}</strong> (puede tomar de 30 a 90 segundos con modelos locales)...</span>`;
+            lobbyReportBox.innerHTML = `<span class="text-yellow-400">Consultando a <strong>${escapeHtml(engineName)}</strong> (sin límite de tiempo; puedes pulsar 'Cancelar' en cualquier momento)...</span>`;
             
             try {
-                const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`);
+                const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`, {
+                    signal: premarketAbortController.signal
+                });
                 const data = await res.json();
                 
-                if (data.status === "error") {
+                if (data.status === "cancelled") {
+                    lobbyReportBox.innerHTML = `<span class="text-yellow-400 font-bold">Proceso cancelado. Memoria RAM liberada y modelos descargados.</span>`;
+                } else if (data.status === "error") {
                     lobbyReportBox.innerHTML = `<span class="text-red-400">Error: ${escapeHtml(data.message)}</span>`;
                 } else if (data.status === "idle") {
                     lobbyReportBox.innerHTML = `<span class="text-gray-400">${escapeHtml(data.message)}</span>`;
@@ -2604,7 +2839,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     lobbyReportBox.innerHTML = html;
                 }
             } catch (e) {
+                if (e.name === 'AbortError') {
+                    return; // Ya manejado por abortPremarketProcess
+                }
                 lobbyReportBox.innerHTML = `<span class="text-red-400">Fallo de red: ${escapeHtml(e.message)}</span>`;
+            } finally {
+                if (btnCancelLobby) btnCancelLobby.classList.add("hidden");
+                premarketAbortController = null;
             }
             
             btnLobbyPremarket.innerHTML = '✅ Reporte Generado';

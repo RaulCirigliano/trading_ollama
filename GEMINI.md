@@ -13,10 +13,9 @@ Cuando el proyecto migre de "Paper Trading" a "Dinero Real", se debe priorizar e
 
 
 ## Metodología de Control de Versiones (Regla Estricta Git)
-1. **Validación requerida:** Tienes ESTRICTAMENTE PROHIBIDO ejecutar comandos `git commit` o `git push` de forma automática tras modificar el código.
-2. **Ciclo de trabajo:** Desarrolla, edita archivos y asiste al usuario. Espera pacientemente a que el usuario pruebe los cambios en su entorno local.
-3. **Desencadenante (Trigger):** SOLO debes preparar un commit y sugerir o ejecutar la subida al repositorio cuando el usuario confirme de manera explícita que está satisfecho con los cambios (ej. "me gusta cómo funciona", "funciona perfecto", "súbelo a git").
-4. **Repositorio Limpio:** El objetivo es que cada commit sea una versión validada, libre de código roto o experimentos sin terminar.
+1. **Validación Requerida:** Tienes ESTRICTAMENTE PROHIBIDO ejecutar comandos `git commit` o `git push` de forma automática tras modificar el código. Desarrolla y espera la confirmación explícita del usuario.
+2. **Desencadenante Explícito (Trigger):** SOLO debes preparar el commit y ejecutar la subida (`git push`) cuando el usuario lo ordene explícitamente (ej. "lo subimos", "sube los cambios", "haz git push") para que la otra máquina pueda sincronizar mediante `git pull`.
+3. **Repositorio Limpio:** El objetivo es que cada commit sea una versión validada y completa, libre de código roto o experimentos sin terminar.
 
 ## Mantenimiento de la Documentación (CONTEXTO.md)
 1. **Clasificación Proactiva:** Cuando el usuario pida agregar nuevas directivas o reglas al proyecto, antes de modificar `CONTEXTO.md`, la IA debe analizar la estructura del documento y recomendarle al usuario si la nueva regla encaja en un ítem/sección existente o si amerita crear un bloque nuevo.

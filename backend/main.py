@@ -48,6 +48,7 @@ app.add_middleware(
 
 # Locks de concurrencia a nivel de proceso
 OLLAMA_LOCK = threading.Lock()
+PREMARKET_CANCEL_EVENT = threading.Event()
 CSV_LOCK = threading.Lock()
 _CACHE_LOCK = threading.Lock()
 _KEY_LOCKS: Dict[str, threading.Lock] = {}
@@ -65,6 +66,13 @@ def validate_symbol(symbol: str):
     """Valida que el símbolo pertenezca a la lista oficial soportada."""
     if not symbol or symbol not in SUPPORTED_SYMBOLS:
         raise HTTPException(status_code=400, detail=f"Símbolo no soportado: '{symbol}'. Símbolos permitidos: {SUPPORTED_SYMBOLS}")
+
+VALID_TIMEFRAMES = {"1m", "5m", "15m", "1h"}
+
+def validate_timeframe(timeframe: str):
+    """Valida que el timeframe pertenezca al conjunto oficial permitido (Bloque 5 item 3)."""
+    if not timeframe or timeframe not in VALID_TIMEFRAMES:
+        raise HTTPException(status_code=400, detail=f"Timeframe no soportado: '{timeframe}'. Timeframes permitidos: {list(VALID_TIMEFRAMES)}")
 
 def verify_auth_token(request: Request, x_api_token: Optional[str] = Header(None)):
     """Validación de seguridad usando hmac.compare_digest para prevenir timing attacks (Bloque 5 item 6)."""
@@ -127,26 +135,20 @@ def get_ohlcv(symbol: str, timeframe: str, limit: int):
 def _fetch_raw_price(symbol: str):
     if '/' in symbol:
         ticker = exchange.fetch_ticker(symbol)
-        return float(ticker['last']), int(ticker.get('timestamp') or (time.time() * 1000))
+        quote_ts = int(ticker.get('timestamp') or (time.time() * 1000))
+        return float(ticker['last']), quote_ts
     else:
         import yfinance as yf
         ticker = yf.Ticker(symbol)
-        price = None
-        try:
-            fast = getattr(ticker, 'fast_info', None)
-            if fast is not None:
-                price = fast.get('last_price') if hasattr(fast, 'get') else fast['last_price']
-        except Exception:
-            price = None
-        if price is None or not isinstance(price, (int, float)) or price <= 0:
-            hist = ticker.history(period='1d', interval='1m')
-            if hist.empty:
-                hist = ticker.history(period='5d', interval='1m')
-            if not hist.empty:
-                price = float(hist['Close'].iloc[-1])
-            else:
-                raise Exception(f"No se pudieron obtener cotizaciones de {symbol} en Yahoo Finance")
-        return float(price), int(time.time() * 1000)
+        hist = ticker.history(period='1d', interval='1m')
+        if hist.empty:
+            hist = ticker.history(period='5d', interval='1m')
+        if not hist.empty:
+            price = float(hist['Close'].iloc[-1])
+            quote_ts = int(hist.index[-1].timestamp() * 1000)
+        else:
+            raise Exception(f"No se pudieron obtener cotizaciones de {symbol} en Yahoo Finance")
+        return float(price), quote_ts
 
 def get_cached_price(symbol: str):
     ttl = 2.0 if '/' in symbol else 15.0
@@ -163,8 +165,8 @@ def get_cached_price(symbol: str):
             entry = _CACHE_DATA.get(cache_key)
             if entry and time.time() < entry["expires_at"]:
                 return entry["data"]
-        price, ts = _fetch_raw_price(symbol)
-        result = {"price": price, "ts": ts}
+        price, quote_ts = _fetch_raw_price(symbol)
+        result = {"price": price, "ts": int(time.time() * 1000), "quote_ts": quote_ts}
         with _CACHE_LOCK:
             _CACHE_DATA[cache_key] = {"data": result, "expires_at": time.time() + ttl}
         return result
@@ -215,13 +217,22 @@ def get_price(symbol: str = "BTC/USDT"):
     try:
         cached = get_cached_price(symbol)
         now_s = time.time()
-        candle_ts_s = (cached["ts"] / 1000.0) if cached["ts"] > 1e11 else cached["ts"]
-        data_age_s = max(0, int(now_s - candle_ts_s))
+        quote_ts = cached.get("quote_ts", cached.get("ts"))
+        quote_ts_s = (quote_ts / 1000.0) if quote_ts > 1e11 else quote_ts
+        quote_age_s = max(0, int(now_s - quote_ts_s))
+        stale_threshold_s = 20 if '/' in symbol else 150
+        market_open = bool(quote_age_s < 900 or (symbol.endswith('.BA') and quote_age_s < 1800))
+        feed_delayed = bool(quote_age_s > stale_threshold_s and market_open)
         return {
             "symbol": symbol,
             "price": cached["price"],
             "ts": cached["ts"],
-            "data_age_s": data_age_s
+            "quote_ts": int(quote_ts_s * 1000),
+            "quote_age_s": quote_age_s,
+            "data_age_s": quote_age_s,
+            "stale_threshold_s": stale_threshold_s,
+            "market_open": market_open,
+            "feed_delayed": feed_delayed
         }
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -229,8 +240,9 @@ def get_price(symbol: str = "BTC/USDT"):
 @app.get("/api/market/history")
 def get_history(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int = 100):
     validate_symbol(symbol)
-    # Acotar limit a rango seguro 1..500 (Bloque 5 item 3)
-    bounded_limit = max(1, min(500, int(limit)))
+    validate_timeframe(timeframe)
+    # Acotar limit a rango seguro 10..500 (Bloque 5 item 3)
+    bounded_limit = max(10, min(500, int(limit)))
     try:
         ohlcv = get_ohlcv(symbol, timeframe, bounded_limit)
         import pandas as pd
@@ -262,6 +274,11 @@ def get_history(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int = 10
             if not pd.isna(row['vwap_lower']):
                 item["vwap_lower"] = round(row['vwap_lower'], 2)
             formatted_data.append(item)
+            
+        if formatted_data and not df.empty:
+            latest_ts_raw = df.iloc[-1]['timestamp']
+            latest_ts_s = (latest_ts_raw / 1000.0) if latest_ts_raw > 1e11 else latest_ts_raw
+            formatted_data[-1]["last_candle_age_s"] = max(0, int(time.time() - latest_ts_s))
             
         return formatted_data
     except Exception as e:
@@ -317,9 +334,11 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
                         impacto = impact_map.get(raw_type, "NEUTRAL")
 
                         reason = str(s.get("reason", s.get("justificacion", "")))[:300]
-                        titular = str(s.get("titular", s.get("title", reason)))[:300]
-                        if not titular:
-                            titular = reason if reason else "Sin titular"
+                        raw_title = str(s.get("titular", s.get("title", "")))[:300].strip()
+                        if not raw_title or raw_title.lower() == reason.lower():
+                            titular = f"Alerta Radar: {raw_asset} ({impacto})"
+                        else:
+                            titular = raw_title
 
                         cards_to_add.append(OpportunityCard(
                             id=str(uuid.uuid4()),
@@ -339,16 +358,25 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
             except Exception as e:
                 print("Error general guardando en buzón:", e)
 
-        # 1. Extraer titulares generales
+        # 1. Extraer titulares generales, cripto y referentes de mercado
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        rss_url = 'https://news.google.com/rss/search'
-        r = requests.get(rss_url, params={'q': 'economy global markets finance', 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'}, headers=headers, timeout=10)
-        feed = feedparser.parse(r.content)
-
+        rss_queries = [
+            ({'q': 'economy global markets finance', 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'}, 3),
+            ({'q': 'mercado financiero bitcoin acciones OR bolsa', 'hl': 'es-419', 'gl': 'AR', 'ceid': 'AR:es-419'}, 3),
+            ({'q': 'Carlos Maslaton mercado OR bitcoin OR bolsa', 'hl': 'es-419', 'gl': 'AR', 'ceid': 'AR:es-419'}, 3)
+        ]
         titulares = []
-        limit = 5 if engine == "deepseek" else 10
-        for entry in feed.entries[:limit]:
-            titulares.append(entry.title)
+        for params, p_limit in rss_queries:
+            try:
+                r = requests.get('https://news.google.com/rss/search', params=params, headers=headers, timeout=6)
+                if r.status_code == 200:
+                    feed = feedparser.parse(r.content)
+                    for entry in feed.entries[:p_limit]:
+                        clean_t = str(entry.title).strip()
+                        if clean_t and clean_t not in titulares:
+                            titulares.append(clean_t)
+            except Exception:
+                continue
 
         news_text = "\n".join(titulares)
 
@@ -373,7 +401,9 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
         No incluyas markdown, responde directamente con el array [].
         '''
 
-        if engine in ["ai", "gemini"]:
+        if engine == "local":
+            return [{"asset": "LOCAL_MKT", "type": "NEUTRAL", "confidence": 0, "reason": "Radar inactivo en modo Cuantitativo Local (sin LLM).", "schedule": "-"}]
+        elif engine in ["ai", "gemini"]:
             api_key = os.getenv("GEMINI_API_KEY")
             if not api_key or api_key == "tu_clave_aqui_sin_comillas":
                 return [{"asset": "GEMINI_OFF", "type": "Peligro", "confidence": 0, "reason": "Falta API Key", "schedule": "-"}]
@@ -439,6 +469,7 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
 @app.get("/api/macro/premarket")
 def get_premarket_digest(request: Request, engine: str = "gemini", x_api_token: Optional[str] = Header(None)):
     verify_auth_token(request, x_api_token)
+    PREMARKET_CANCEL_EVENT.clear()
     try:
         from backend.premarket_digest import run_premarket_digest
         if engine != "gemini" and engine != "ai":
@@ -446,15 +477,46 @@ def get_premarket_digest(request: Request, engine: str = "gemini", x_api_token: 
             if not acquired:
                 return {"status": "busy", "message": "Ollama ocupado procesando otra tarea."}
             try:
-                return run_premarket_digest(engine=engine)
+                return run_premarket_digest(engine=engine, cancel_event=PREMARKET_CANCEL_EVENT)
             finally:
-                OLLAMA_LOCK.release()
+                try:
+                    if OLLAMA_LOCK.locked():
+                        OLLAMA_LOCK.release()
+                except RuntimeError:
+                    pass
         else:
-            return run_premarket_digest(engine=engine)
+            return run_premarket_digest(engine=engine, cancel_event=PREMARKET_CANCEL_EVENT)
     except ImportError:
         return {"status": "error", "message": "Módulo backend.premarket_digest no disponible."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.post("/api/macro/premarket/cancel")
+def cancel_premarket_digest(request: Request, x_api_token: Optional[str] = Header(None)):
+    verify_auth_token(request, x_api_token)
+    PREMARKET_CANCEL_EVENT.set()
+    
+    # Liberar el bloqueo de Ollama si estaba tomado
+    try:
+        if OLLAMA_LOCK.locked():
+            OLLAMA_LOCK.release()
+    except RuntimeError:
+        pass
+
+    # Descargar modelos de Ollama de la memoria RAM inmediatamente (keep_alive: 0)
+    unloaded = []
+    for model_name in ["trader-deepseek", "trader-ia"]:
+        try:
+            requests.post("http://localhost:11434/api/generate", json={"model": model_name, "keep_alive": 0}, timeout=4)
+            unloaded.append(model_name)
+        except Exception:
+            pass
+
+    return {
+        "status": "cancelled",
+        "message": "Proceso Pre-Market cancelado exitosamente y memoria RAM liberada.",
+        "unloaded_models": unloaded
+    }
 
 @app.get("/api/market/sentiment")
 def get_sentiment(symbol: str = "BTC/USDT", source: str = "coindesk"):
@@ -571,6 +633,7 @@ def get_analysis(
 ):
     verify_auth_token(request, x_api_token)
     validate_symbol(symbol)
+    validate_timeframe(timeframe)
     try:
         import pandas as pd
         import ta

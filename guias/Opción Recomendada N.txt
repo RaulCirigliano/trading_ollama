@@ -1,0 +1,42 @@
+🥇 Opción Recomendada N° 1: ETH/USDT o BTC/USDT en 5m o 15m (Lunes a Viernes)
+
+Este es el ecosistema óptimo para el bot por tres razones fundamentales:
+
+La Matemática de las Comisiones (0,10%):
+Cripto tiene las comisiones más bajas del mercado (0,10% por orden = 0,20% ida y vuelta).
+Como vimos anoche, tu algoritmo de Breakeven necesita un movimiento pequeño (apenas un 
++
+0
+,
+3
+%
++0,3%) para asegurar las comisiones y ponerse en verde. En acciones o bonos, las comisiones se comerían esa ganancia.
+Respeto a los Tiempos de Ollama:
+En 1 minuto, Ollama tarda entre 10 y 20 segundos en responder (se come un tercio de la vela).
+En 5 o 15 minutos, la IA tiene tiempo sobrado para razonar con calma, filtra el 80% del "ruido aleatorio" del mercado y las tendencias respetan mucho mejor el VWAP y las bandas Bollinger.
+Liquidez 24 horas sin "Gaps" (Huecos de Apertura):
+En las acciones tradicionales, el mercado cierra a la tarde y si abre al día siguiente con una mala noticia, el precio puede caer un 5% de golpe saltándose tu Stop Loss. Cripto cotiza continuo, lo que permite que tu monitor de riesgo actúe segundo a segundo sin sorpresas.
+Nota: Opera preferentemente de Lunes a Viernes. Los fines de semana desaparecen los bancos e instituciones y el mercado se vuelve lateral y engañoso.
+🥈 Opción Recomendada N° 2: ETFs de Wall Street (SPY o QQQ) entre las 11:30 y 16:00 ARG
+
+Si prefieres mercados tradicionales en lugar de criptomonedas:
+
+El "Reino" del VWAP Institucional:
+El S&P 500 (SPY) y el Nasdaq (QQQ) son los activos donde los grandes fondos de inversión de Nueva York operan con algoritmos basados exactamente en VWAP. Tu Agente Cuantitativo habla el mismo idioma técnico que Wall Street.
+Regla de Oro:
+Debe operar estrictamente de 11:30 a 16:00 (hora argentina). Fuera de esa ventana no hay volumen institucional o el mercado está cerrado.
+❌ Dónde NO te recomiendo poner a la IA a trabajar
+Acciones Argentinas (BYMA / Cedears en intradía):
+Las comisiones de los brokers locales rondan el 0,5% al 1% por orden (1% a 2% ida y vuelta). Ninguna estrategia intradía de scalping sobrevive a semejante costo de comisión.
+Temporalidad de 1 Minuto con IA Local:
+La vela de 1m genera mucho estrés a la CPU/RAM ejecutando modelos de lenguaje continuos, para señales que en su mayoría son "ruido" de mercado.
+💡 La Configuración Ideal Sugerida
+
+Para dejar al bot trabajando de forma sólida y estable:
+
+Activo: ETH/USDT o BTC/USDT
+Temporalidad: 5m o 15m (Tendencias seguras)
+Tamaño de Posición: 25% a 50% (Conservador / Moderado)
+Take Profit / Stop Loss: Ganar +3.0% | Perder -2.0%
+Comisión Broker: 0.10%
+Cerebro: IA Privada Base (Ollama) o Local Cuantitativo

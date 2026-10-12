@@ -12,6 +12,8 @@ _LOCK = threading.RLock()
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUZON_FILE = os.path.join(PROJECT_ROOT, "buzon_radar.json")
 
+_PROCESS_CLEANED_PATHS = set()
+
 class OpportunityCard(BaseModel):
     id: str
     timestamp: str  # ISO format
@@ -27,7 +29,9 @@ class RadarInbox:
         self._insert_count = 0
         with _LOCK:
             self._ensure_file_exists()
-            self.clear_expired_cards()
+            if self.file_path not in _PROCESS_CLEANED_PATHS:
+                self.clear_expired_cards()
+                _PROCESS_CLEANED_PATHS.add(self.file_path)
 
     def _ensure_file_exists(self):
         """Crea el archivo del buzón si no existe."""
@@ -147,6 +151,8 @@ class RadarInbox:
     def clear_expired_cards(self, hours_ttl: int = 72) -> int:
         """Limpia físicamente el archivo borrando las tarjetas vencidas."""
         with _LOCK:
+            cards = self.read_all_cards()
             active_cards = self.get_active_cards(hours_ttl)
-            self.save_all_cards(active_cards)
+            if len(active_cards) != len(cards):
+                self.save_all_cards(active_cards)
             return len(active_cards)
