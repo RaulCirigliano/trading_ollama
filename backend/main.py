@@ -9,6 +9,7 @@ import re
 import hmac
 import csv
 import threading
+import requests
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 
@@ -491,30 +492,59 @@ def get_premarket_digest(request: Request, engine: str = "gemini", x_api_token: 
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.post("/api/macro/premarket/cancel")
-def cancel_premarket_digest(request: Request, x_api_token: Optional[str] = Header(None)):
-    verify_auth_token(request, x_api_token)
-    PREMARKET_CANCEL_EVENT.set()
+def purge_ollama_models() -> List[str]:
+    """Consulta los modelos activos en Ollama (/api/ps) y los desaloja forzosamente de RAM (keep_alive: 0)."""
+    unloaded = []
+    try:
+        ps_res = requests.get("http://localhost:11434/api/ps", timeout=3)
+        if ps_res.status_code == 200:
+            running_models = ps_res.json().get("models", [])
+            for m in running_models:
+                name = m.get("name") or m.get("model")
+                if name:
+                    try:
+                        requests.post("http://localhost:11434/api/generate", json={"model": name, "keep_alive": 0}, timeout=4)
+                        unloaded.append(name)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
     
-    # Liberar el bloqueo de Ollama si estaba tomado
+    # Fallback asegurado para todos los modelos conocidos de trading si /api/ps falló o no los reportó
+    for fallback_name in ["trader-deepseek", "trader-ia", "qwen2.5:3b", "deepseek-r1:8b", "deepseek-r1:1.5b", "llama3:latest"]:
+        if fallback_name not in unloaded:
+            try:
+                requests.post("http://localhost:11434/api/generate", json={"model": fallback_name, "keep_alive": 0}, timeout=2)
+            except Exception:
+                pass
+
     try:
         if OLLAMA_LOCK.locked():
             OLLAMA_LOCK.release()
     except RuntimeError:
         pass
 
-    # Descargar modelos de Ollama de la memoria RAM inmediatamente (keep_alive: 0)
-    unloaded = []
-    for model_name in ["trader-deepseek", "trader-ia"]:
-        try:
-            requests.post("http://localhost:11434/api/generate", json={"model": model_name, "keep_alive": 0}, timeout=4)
-            unloaded.append(model_name)
-        except Exception:
-            pass
+    return unloaded
 
+@app.post("/api/macro/premarket/cancel")
+def cancel_premarket_digest(request: Request, x_api_token: Optional[str] = Header(None)):
+    verify_auth_token(request, x_api_token)
+    PREMARKET_CANCEL_EVENT.set()
+    unloaded = purge_ollama_models()
     return {
         "status": "cancelled",
         "message": "Proceso Pre-Market cancelado exitosamente y memoria RAM liberada.",
+        "unloaded_models": unloaded
+    }
+
+@app.post("/api/ollama/purge")
+def purge_ollama_endpoint(request: Request, x_api_token: Optional[str] = Header(None)):
+    verify_auth_token(request, x_api_token)
+    PREMARKET_CANCEL_EVENT.set()
+    unloaded = purge_ollama_models()
+    return {
+        "status": "success",
+        "message": "Memoria RAM de Ollama purgada exitosamente. Procesos y modelos desalojados.",
         "unloaded_models": unloaded
     }
 

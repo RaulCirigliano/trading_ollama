@@ -2333,6 +2333,9 @@ function updateBrainBadge() {
 document.getElementById('engineSelect')?.addEventListener('change', () => {
     updateBrainBadge();
     logToTerminal(`Motor de Análisis cambiado a: ${document.getElementById('engineSelect').options[document.getElementById('engineSelect').selectedIndex].text}`, 'warn');
+    if (typeof window.purgarMemoriaIA === 'function') {
+        window.purgarMemoriaIA(true);
+    }
 });
 
 // Inicializar el estilo al cargar la página
@@ -2631,6 +2634,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (endInput && !endInput.value) endInput.value = formatForInput(hoy);
 });
 
+// --- PROTOCOLO DE PURGA Y CONTROL DE MEMORIA RAM DE OLLAMA ---
+window.purgarMemoriaIA = async function(silent = false) {
+    if (!silent) logToTerminal("🧹 [PURGA RAM] Desalojando modelos y cancelando tareas en Ollama...", "warn");
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/ollama/purge`, { method: "POST" });
+        const data = await res.json();
+        const modelsList = (data.unloaded_models && data.unloaded_models.length > 0)
+            ? data.unloaded_models.join(", ")
+            : "Ninguno activo";
+        if (!silent) {
+            logToTerminal(`✅ [PURGA RAM] Memoria liberada. Modelos purgados de RAM: ${modelsList}`, "success");
+        } else {
+            logToTerminal(`🔄 [AUTO-PURGA] Memoria de Ollama liberada para el nuevo motor (${modelsList}).`, "info");
+        }
+    } catch (err) {
+        if (!silent) logToTerminal(`⚠️ [PURGA RAM] Error de conexión al purgar Ollama: ${err.message}`, "error");
+    }
+};
+
 // --- PRE-MARKET DIGEST LOGIC ---
 let premarketAbortController = null;
 
@@ -2794,6 +2816,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnCancelLobby) {
         btnCancelLobby.addEventListener("click", () => abortPremarketProcess('lobby'));
     }
+
+    document.getElementById("lobbyEngineSelect")?.addEventListener("change", () => {
+        if (typeof window.purgarMemoriaIA === 'function') {
+            window.purgarMemoriaIA(true);
+        }
+    });
 
     if (btnLobbyPremarket) {
         btnLobbyPremarket.addEventListener("click", async () => {
