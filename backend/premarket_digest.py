@@ -194,7 +194,7 @@ Debes responder ÚNICAMENTE en formato JSON válido estricto, sin markdown ni ex
 
         if engine == "deepseek":
             model_name = "trader-deepseek"
-            timeout_sec = None
+            timeout_sec = 120
         elif engine == "qwen":
             model_name = "trader-qwen"
             timeout_sec = 60
@@ -202,13 +202,25 @@ Debes responder ÚNICAMENTE en formato JSON válido estricto, sin markdown ni ex
             model_name = "trader-ia"
             timeout_sec = 120
 
+        system_prompt = (
+            "Eres el Cerebro Cuantitativo Pre-Market. Razonamiento conciso y directo en hitos lineales (máximo 150 palabras). "
+            "Evalúa los eventos macroeconómicos y responde EXCLUSIVAMENTE con el objeto JSON solicitado con estructura {resumen_general, activos}. "
+            "Prohibido divagar en círculos o escribir texto fuera del JSON."
+        )
+
         payload = {
             "model": model_name,
             "prompt": prompt,
-            "system": "Eres el Cerebro Cuantitativo Pre-Market. Evalúa los eventos macroeconómicos y responde EXCLUSIVAMENTE con el objeto JSON solicitado con estructura {resumen_general, activos}. Prohibido escribir [COMPRAR], [VENDER] o texto fuera del JSON.",
+            "system": system_prompt,
             "stream": False
         }
-        if engine != "deepseek":
+        if engine == "deepseek":
+            payload["options"] = {
+                "num_predict": 900,
+                "temperature": 0.1,
+                "repeat_penalty": 1.15
+            }
+        else:
             payload["format"] = "json"
 
         try:
@@ -224,9 +236,12 @@ Debes responder ÚNICAMENTE en formato JSON válido estricto, sin markdown ni ex
             if response.status_code == 200:
                 data = response.json()
                 raw_text = data.get("response", "").strip()
+                think_text = data.get("thinking", "").strip()
                 # Limpiar etiquetas de razonamiento <think>...</think> si provienen de DeepSeek-R1
                 cleaned_resp = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
                 raw_response_text = cleaned_resp if cleaned_resp else raw_text
+                if not raw_response_text and think_text:
+                    raw_response_text = think_text
             else:
                 return {"status": "error", "message": f"Ollama ({model_name}) devolvió código {response.status_code}"}
         except requests.exceptions.Timeout:

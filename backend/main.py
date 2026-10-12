@@ -438,20 +438,29 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
                 payload = {
                     "model": opp_model,
                     "prompt": prompt,
-                    "stream": False,
-                    "format": "json"
+                    "stream": False
                 }
-                res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=120)
+                if engine != "deepseek":
+                    payload["format"] = "json"
+                else:
+                    payload["options"] = {
+                        "num_predict": 700,
+                        "temperature": 0.1,
+                        "repeat_penalty": 1.15
+                    }
+                res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=90 if engine == "deepseek" else 120)
                 if res.status_code == 404 and engine == "qwen":
                     payload["model"] = "qwen2.5:3b"
                     res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=120)
                 if res.status_code == 200:
                     resp_json = res.json().get("response", "[]")
-                    json_match = re.search(r'\[.*\]', resp_json, re.DOTALL)
+                    clean_resp = re.sub(r'<think>.*?</think>', '', resp_json, flags=re.DOTALL | re.IGNORECASE).strip()
+                    target_resp = clean_resp if clean_resp else resp_json
+                    json_match = re.search(r'\[.*\]', target_resp, re.DOTALL)
                     if json_match:
                         final_res = json.loads(json_match.group(0))
                     else:
-                        parsed = json.loads(resp_json)
+                        parsed = json.loads(target_resp)
                         final_res = parsed
                         if isinstance(parsed, dict):
                             for k, v in parsed.items():
@@ -905,7 +914,11 @@ def get_analysis(
                     - Con posición abierta: NO compres de nuevo; responde [MANTENER] o [VENDER].
                     - Sin posición: compra solo si cubre holgadamente comisiones ({round_trip_fee}%).
 
-                    ANALIZA PASO A PASO CON RAZONAMIENTO BREVE.
+                    DIRECTIVA DE PENSAMIENTO LINEAL Y TIEMPO ACOTADO:
+                    1. Formula tu premisa técnica y cuantitativa en máximo 150 palabras.
+                    2. Extrae una conclusión intermedia directa sin dudar ni reiniciar el razonamiento.
+                    3. Si hay duda, contradicción o bajo ratio riesgo/beneficio, concluye inmediatamente MANTENER.
+
                     Al final de tu respuesta, da tu veredicto usando OBLIGATORIAMENTE entre corchetes:
                     [COMPRAR] o [VENDER] o [MANTENER]
                     '''
@@ -913,25 +926,49 @@ def get_analysis(
                     payload = {
                         "model": "trader-deepseek",
                         "prompt": prompt_text,
-                        "stream": False
+                        "stream": False,
+                        "options": {
+                            "num_predict": 700,
+                            "temperature": 0.1,
+                            "repeat_penalty": 1.15
+                        }
                     }
-                    res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=110)
+                    res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=90)
                     if res.status_code == 200:
-                        respuesta = res.json().get("response", "")
-                        clean_text_resp = re.sub(r'<think>.*?</think>', '', respuesta, flags=re.DOTALL | re.IGNORECASE).strip()
-                        target_text = clean_text_resp if clean_text_resp else respuesta
+                        data = res.json()
+                        resp_text = data.get("response", "").strip()
+                        think_text = data.get("thinking", "").strip()
+
+                        # 1. Limpieza de think tags si están incrustadas en response
+                        clean_text = re.sub(r'<think>.*?</think>', '', resp_text, flags=re.DOTALL | re.IGNORECASE).strip()
+                        target_text = clean_text if clean_text else resp_text
+
                         matches = re.findall(r'\[(COMPRAR|VENDER|MANTENER)\]', target_text, flags=re.IGNORECASE)
+                        if not matches:
+                            matches = re.findall(r'\b(COMPRAR|VENDER|MANTENER)\b', target_text, flags=re.IGNORECASE)
+
+                        # 2. Dual-Catch: Si response vino vacío (se cortó durante el thinking), rescatar veredicto del thinking
+                        if not matches and think_text:
+                            think_matches = re.findall(r'\[(COMPRAR|VENDER|MANTENER)\]', think_text, flags=re.IGNORECASE)
+                            if not think_matches:
+                                think_matches = re.findall(r'\b(COMPRAR|VENDER|MANTENER)\b', think_text, flags=re.IGNORECASE)
+                            if think_matches:
+                                matches = think_matches
+                                target_text = f"[Veredicto en razonamiento]: {think_text[-250:]}"
+
                         if matches:
                             signal = normalize_signal(matches[-1])
                         else:
                             signal = "MANTENER"
-                        reason = target_text[:300] + "..." if len(target_text) > 300 else target_text
+
+                        display_reason = target_text if target_text else (think_text[-250:] if think_text else "Conclusión: MANTENER por preservación de capital.")
+                        reason = display_reason[:300] + "..." if len(display_reason) > 300 else display_reason
                     else:
                         signal = "ERROR"
                         reason = "Error del servidor Ollama (DeepSeek)."
                 except requests.exceptions.Timeout:
-                    signal = "ERROR"
-                    reason = "Timeout del motor Ollama (110s)."
+                    signal = "MANTENER"
+                    reason = "DeepSeek superó el tiempo máximo (90s). Veredicto de seguridad: MANTENER."
                 except Exception as e:
                     signal = "ERROR"
                     reason = f"DeepSeek no responde: {str(e)}"
