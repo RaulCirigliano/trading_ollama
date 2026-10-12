@@ -26,7 +26,7 @@ app = FastAPI(title="Trading AI API", description="API para el agente de trading
 # Seguridad: TrustedHostMiddleware (Bloque 5 item 6)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["127.0.0.1", "localhost", "testserver"]
+    allowed_hosts=["127.0.0.1", "localhost", "testserver", "192.168.100.16", "192.168.100.10", "100.79.33.85", "ArteBarro"]
 )
 
 # Seguridad: CORS restrictivo con puertos realmente utilizados (Bloque 5 item 6)
@@ -37,8 +37,10 @@ app.add_middleware(
         "http://localhost",
         "http://127.0.0.1:18767",
         "http://localhost:18767",
+        "http://127.0.0.1:18087",
+        "http://localhost:18087",
     ],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:(18767|8080|3000|5500|5173))?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|100\.\d+\.\d+\.\d+)(:(18767|18087|8080|3000|5500|5173))?$",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

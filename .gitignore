@@ -3,5 +3,6 @@ venv/
 __pycache__/
 *.pyc
 historial_trades.csv
+historial_trades_legacy.csv
 scripts_antiguos/
 buzon_radar.json

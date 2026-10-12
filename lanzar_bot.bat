@@ -6,13 +6,13 @@ FOR /F "tokens=5" %%T IN ('netstat -a -n -o ^| findstr ":18767 "') DO taskkill /
 timeout /t 1 /nobreak >nul
 
 echo Iniciando el Cerebro Matematico (Backend)...
-start /b .\venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 18767
+start /b .\venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 18767 --reload
 
 echo Iniciando la Interfaz Visual (Frontend)...
 start /b .\venv\Scripts\python.exe -m http.server 18087 --directory frontend
 
 echo Esperando a que los servidores arranquen...
-timeout /t 2 /nobreak >nul
+timeout /t 4 /nobreak >nul
 
 echo Abriendo la aplicacion en tu navegador web...
 start http://localhost:18087

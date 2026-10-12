@@ -1,4 +1,6 @@
-const API_BASE_URL = 'http://127.0.0.1:18767';
+const API_BASE_URL = (window.location.protocol && window.location.hostname)
+    ? `${window.location.protocol}//${window.location.hostname}:18767`
+    : 'http://127.0.0.1:18767';
 // Elementos de UI
 const terminal = document.getElementById('terminal');
 const agentToggle = document.getElementById('agentToggle');
@@ -30,6 +32,10 @@ function logToTerminal(message, type = 'info') {
     p.appendChild(timeSpan);
     p.appendChild(document.createTextNode(String(message)));
     terminal.appendChild(p);
+    // Limitar el buffer del DOM para evitar saturación de RAM en sesiones largas
+    while (terminal.children.length > 300) {
+        terminal.removeChild(terminal.firstChild);
+    }
     terminal.scrollTop = terminal.scrollHeight;
 }
 
