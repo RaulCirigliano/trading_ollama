@@ -154,21 +154,31 @@ Debes responder ÚNICAMENTE en formato JSON válido estricto, sin markdown ni ex
             return {"status": "error", "message": f"Error en Gemini ({model_name}): {str(e)}"}
             
     else: # Ollama local
+        model_name = "trader-deepseek" if engine == "deepseek" else "trader-ia"
+        timeout_sec = 180 if engine == "deepseek" else 120
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": False
+        }
+        if engine != "deepseek":
+            payload["format"] = "json"
+
         try:
-            response = requests.post("http://localhost:11434/api/generate", json={
-                "model": "trader-ia",
-                "prompt": prompt,
-                "stream": False,
-                "format": "json"
-            }, timeout=120)
+            response = requests.post("http://localhost:11434/api/generate", json=payload, timeout=timeout_sec)
             
             if response.status_code == 200:
                 data = response.json()
-                raw_response_text = data.get("response", "").strip()
+                raw_text = data.get("response", "").strip()
+                # Limpiar etiquetas de razonamiento <think>...</think> si provienen de DeepSeek-R1
+                clean_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
+                raw_response_text = clean_text if clean_text else raw_text
             else:
-                return {"status": "error", "message": f"Ollama devolvió código de error {response.status_code}"}
+                return {"status": "error", "message": f"Ollama ({model_name}) devolvió código {response.status_code}"}
+        except requests.exceptions.Timeout:
+            return {"status": "error", "message": f"Timeout del motor {model_name} ({timeout_sec}s agotados)."}
         except Exception as e:
-            return {"status": "error", "message": f"Ollama no responde: {str(e)}"}
+            return {"status": "error", "message": f"Ollama ({model_name}) no responde: {str(e)}"}
 
     # Extracción y validación robusta del JSON mediante regex DOTALL
     json_match = re.search(r'\{.*\}', raw_response_text, re.DOTALL)

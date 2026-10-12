@@ -147,6 +147,8 @@ chart.subscribeCrosshairMove((param) => {
 const symbolSelect = document.getElementById('symbolSelect');
 let currentSymbol = symbolSelect ? symbolSelect.value : 'BTC/USDT';
 let currentPrice = 0;
+let currentPriceSymbol = currentSymbol;
+let currentPriceTs = 0;
 
 // Variables de Simulación (Paper Trading) persistentes en el navegador
 let portfolio = JSON.parse(localStorage.getItem('ai_portfolio_v5')) || {
@@ -598,7 +600,7 @@ function updateCapitalDisplay() {
     let posValue = 0;
     const pos = getOpenPosition();
     if (pos) {
-        const isSameSymbol = (pos.symbol === currentSymbol);
+        const isSameSymbol = (pos.symbol === currentSymbol && currentPriceSymbol === currentSymbol && currentPrice > 0);
         const evalPrice = isSameSymbol ? currentPrice : (window.positionAssetPrice || pos.entryPrice);
         if (pos.currency === currency) {
             posValue = pos.qty * evalPrice;
@@ -673,7 +675,7 @@ function updateCapitalDisplay() {
                     statusBadge.classList.add('hidden');
                 }
             }
-            const isSameSymbol = (currentPos.symbol === currentSymbol);
+            const isSameSymbol = (currentPos.symbol === currentSymbol && currentPriceSymbol === currentSymbol && currentPrice > 0);
             const activePrice = isSameSymbol ? currentPrice : (window.positionAssetPrice || currentPos.entryPrice);
             const pnlNoRealizado = (activePrice - currentPos.entryPrice) * currentPos.qty;
             const pnlPct = currentPos.entryPrice > 0 ? ((activePrice - currentPos.entryPrice) / currentPos.entryPrice) * 100 : 0;
@@ -729,6 +731,14 @@ symbolSelect.addEventListener('change', () => {
     currentSymbol = symbolSelect.value;
     logToTerminal(`Cambiando activo a ${currentSymbol}...`, 'warn');
     
+    // Invalidad precio en pantalla y estado de activo para prevenir órdenes con precios desfasados
+    currentPrice = 0;
+    currentPriceSymbol = '';
+    currentPriceTs = 0;
+    const currentPriceElement = document.getElementById('currentPrice');
+    if (currentPriceElement) currentPriceElement.innerText = '$--.---';
+    updateChartHeaderTitles();
+
     // R2 item 5: Limpiar precio en segundo plano al cambiar de símbolo
     window.positionAssetPrice = null;
     window.positionAssetPriceTs = 0;
@@ -857,6 +867,8 @@ async function fetchMarketData() {
             }
             const currentPriceElement = document.getElementById('currentPrice');
             currentPrice = data[data.length - 1].close; 
+            currentPriceSymbol = reqSymbol;
+            currentPriceTs = Date.now();
             currentPriceElement.innerText = `$${currentPrice.toLocaleString()}`;
             updateCapitalDisplay();
             updateChartHeaderTitles();
@@ -1147,9 +1159,34 @@ const ejecutarAnalisis = async () => {
         }
 
         if (isBuyable || isSellable) {
-            let execPrice = currentPrice;
-            if (isSellable) {
-                execPrice = (openPos.symbol === currentSymbol) ? currentPrice : (window.positionAssetPrice || openPos.entryPrice);
+            let execPrice = 0;
+            if (isBuyable) {
+                // Validación estricta de precio para compras:
+                // Prioridad 1: Precio verificado de la vela recibido del backend para targetSymbol
+                if (data.indicators && typeof data.indicators.current_price === 'number' && data.indicators.current_price > 0) {
+                    execPrice = data.indicators.current_price;
+                } else if (currentPriceSymbol === targetSymbol && currentPrice > 0) {
+                    execPrice = currentPrice;
+                } else {
+                    logToTerminal(`⚠️ [SEGURIDAD] Compra abortada: sin precio verificado para ${targetSymbol} (sincronizando activo).`, 'error');
+                    if (signalCandleTs > 0) lastHandledCandle = { symbol: targetSymbol, candleTs: signalCandleTs };
+                    return;
+                }
+            } else if (isSellable) {
+                if (openPos.symbol === currentSymbol && currentPriceSymbol === currentSymbol && currentPrice > 0) {
+                    execPrice = currentPrice;
+                } else if (data.indicators && typeof data.indicators.current_price === 'number' && data.indicators.current_price > 0) {
+                    execPrice = data.indicators.current_price;
+                } else if (window.positionAssetPrice && (Date.now() - (window.positionAssetPriceTs || 0)) <= 15000) {
+                    execPrice = window.positionAssetPrice;
+                } else {
+                    execPrice = openPos.entryPrice;
+                }
+            }
+
+            if (!Number.isFinite(execPrice) || execPrice <= 0) {
+                logToTerminal(`⚠️ [SEGURIDAD] Orden abortada: precio inválido o no numérico ($${execPrice}) para ${targetSymbol}.`, 'error');
+                return;
             }
 
             if (executionMode === 'auto') {
@@ -1216,6 +1253,8 @@ setInterval(async () => {
             
             const currentPriceElement = document.getElementById('currentPrice');
             currentPrice = latest_candle.close;
+            currentPriceSymbol = reqSymbol;
+            currentPriceTs = Date.now();
             currentPriceElement.innerText = `$${currentPrice.toLocaleString()}`;
             updateCapitalDisplay();
         }
@@ -1624,6 +1663,17 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
     if (!Number.isFinite(portfolio.balances[currency])) {
         logToTerminal(`⚠️ Ejecución abortada: balance no numérico en moneda ${currency}.`, 'error');
         return;
+    }
+
+    // R10: Validación de consistencia de precio en órdenes de COMPRA
+    if (signal === 'COMPRAR') {
+        if (currentPriceSymbol === effectiveSymbol && currentPrice > 0) {
+            const ratio = price / currentPrice;
+            if (ratio < 0.5 || ratio > 2.0) {
+                logToTerminal(`🛑 [SEGURIDAD] Compra abortada: discrepancia severa de precio para ${effectiveSymbol} (orden: $${price} vs mercado: $${currentPrice}). Desincronización prevenida.`, 'error');
+                return;
+            }
+        }
     }
 
     isExecutingTrade = true;
@@ -2521,12 +2571,13 @@ document.addEventListener("DOMContentLoaded", () => {
         btnLobbyPremarket.addEventListener("click", async () => {
             btnLobbyPremarket.innerHTML = '<span class="animate-spin">🔄</span> Consultando al Cerebro...';
             btnLobbyPremarket.disabled = true;
+            const lobbyEngineEl = document.getElementById("lobbyEngineSelect");
+            const engine = lobbyEngineEl?.value || "deepseek";
+            const engineName = lobbyEngineEl?.options[lobbyEngineEl.selectedIndex]?.text || engine;
             lobbyReportBox.classList.remove("hidden");
-            lobbyReportBox.innerHTML = '<span class="text-yellow-400">Generando resumen del fin de semana (puede tomar hasta 2 minutos con Ollama local)...</span>';
+            lobbyReportBox.innerHTML = `<span class="text-yellow-400">Consultando a <strong>${escapeHtml(engineName)}</strong> (puede tomar de 30 a 90 segundos con modelos locales)...</span>`;
             
             try {
-                // By default try to use the engine selected, if not default to engineSelect or ollama
-                const engine = document.getElementById("aiEngineSelect")?.value || document.getElementById("engineSelect")?.value || "ollama";
                 const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`);
                 const data = await res.json();
                 
