@@ -154,9 +154,14 @@ let currentPriceTs = 0;
 let portfolio = JSON.parse(localStorage.getItem('ai_portfolio_v5')) || {
     VAULT: 500.00, // Capital total en la Bóveda del Broker (USD)
     balances: {
-        USDT: 0.00, // Cripto vacía por defecto
+        USDT: 100.00, // Cripto con $100 iniciales para operar
         USD: 0.00,  // Wall Street vacía por defecto
         ARS: 0.00   // Local vacía por defecto
+    },
+    deposits: {
+        USDT: 100.00,
+        USD: 0.00,
+        ARS: 0.00
     },
     ASSET: 0,
     entryPrice: 0
@@ -654,9 +659,34 @@ let isCopilotApprovalPause = false;
 
 // Función de reseteo para limpiar la memoria si el usuario quiere empezar de cero
 window.resetearCuenta = function() {
-    localStorage.removeItem('ai_portfolio_v5');
-    // No borramos 'ai_trade_history' para que el registro histórico sea eterno
-    location.reload();
+    if (confirm("¿Deseas reiniciar la cuenta de Paper Trading? Se restablecerán $100 en la billetera activa y se limpiarán los bloqueos.")) {
+        localStorage.removeItem('ai_portfolio_v5');
+        localStorage.removeItem('ai_risk_state_v2');
+        localStorage.removeItem('ai_cooldown_v1');
+        localStorage.removeItem('ai_stop_after_close');
+        location.reload();
+    }
+};
+
+// Función para establecer el saldo exacto deseado sin perder el historial
+window.fijarCapital = function(monto = 100) {
+    const cur = getCurrency(currentSymbol);
+    portfolio.balances[cur] = monto;
+    portfolio.deposits[cur] = monto;
+    portfolio.position = null;
+    portfolio.ASSET = 0;
+    portfolio.entryPrice = 0;
+    localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
+    const rState = getRiskState();
+    if (rState.books && rState.books[cur]) {
+        rState.books[cur].startEquity = monto;
+        rState.books[cur].realizedPnl = 0;
+        rState.books[cur].consecLosses = 0;
+        rState.books[cur].placeholder = false;
+        saveRiskState(rState);
+    }
+    updateCapitalDisplay();
+    logToTerminal(`🔄 [CAPITAL REAJUSTADO] Saldo de la billetera ${cur} fijado en $${monto.toFixed(2)}.`, 'success');
 };
 
 function updateCapitalDisplay() {
@@ -759,7 +789,7 @@ function updateCapitalDisplay() {
                         <td class="px-2.5 py-2 font-bold" id="apPnl"></td>
                         <td class="px-2.5 py-2 text-right whitespace-nowrap">
                             <button id="btnStopAfterClose" onclick="window.toggleStopAfterClose()" class="text-xs px-2.5 py-1 rounded font-semibold transition mr-2"></button>
-                            <button onclick="window.forceClosePosition()" class="text-xs bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded font-bold shadow-lg transition duration-200 ease-in-out transform hover:scale-105 border border-red-500">✖ CERRAR</button>
+                            <button onclick="window.forceClosePosition(event)" class="text-xs bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded font-bold shadow-lg transition duration-200 ease-in-out transform hover:scale-105 border border-red-500 cursor-pointer" title="Cerrar posición inmediatamente al precio actual">✖ CERRAR</button>
                         </td>
                     </tr>
                 `;
@@ -1768,8 +1798,14 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
         return;
     }
     if (!Number.isFinite(price) || price <= 0) {
-        logToTerminal(`⚠️ Ejecución abortada: precio inválido o no numérico ($${price}).`, 'error');
-        return;
+        if (signal === 'VENDER' && hasOpenPosition()) {
+            const fallbackPos = getOpenPosition();
+            price = (fallbackPos && fallbackPos.entryPrice > 0) ? fallbackPos.entryPrice : 1;
+            logToTerminal(`⚠️ Precio no disponible en tiempo real; ejecutando venta al precio de referencia ($${price}).`, 'warn');
+        } else {
+            logToTerminal(`⚠️ Ejecución abortada: precio inválido o no numérico ($${price}).`, 'error');
+            return;
+        }
     }
 
     const effectiveSymbol = symbol || currentSymbol;
@@ -1880,8 +1916,8 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
 
             // Validación de frescura en milisegundos para ventas si no está en pantalla (Bloque 1 y 2)
             let execSellPrice = price;
-            const isAutomaticRiskExit = ['Stop Loss', 'Breakeven', 'Breakeven Stop', 'Trailing', 'Trailing Stop', 'Take Profit'].includes(mode);
-            if (sellSymbol !== currentSymbol && !isAutomaticRiskExit) {
+            const isExemptFromStaleCheck = ['Manual', 'Stop Loss', 'Breakeven', 'Breakeven Stop', 'Trailing', 'Trailing Stop', 'Take Profit'].includes(mode);
+            if (sellSymbol !== currentSymbol && !isExemptFromStaleCheck) {
                 const nowMs = Date.now();
                 const ageMs = nowMs - (window.positionAssetPriceTs || 0);
                 const thresholdMs = sellSymbol.includes('/') ? 20000 : 150000;
@@ -1890,6 +1926,14 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
                     return;
                 }
                 execSellPrice = window.positionAssetPrice;
+            } else if (sellSymbol !== currentSymbol && isExemptFromStaleCheck) {
+                if (typeof window.positionAssetPrice === 'number' && window.positionAssetPrice > 0) {
+                    execSellPrice = window.positionAssetPrice;
+                } else if (price > 0) {
+                    execSellPrice = price;
+                } else {
+                    execSellPrice = pos.entryPrice || 1;
+                }
             }
 
             const dolaresObtenidosBruto = posQty * execSellPrice;
@@ -2140,7 +2184,11 @@ document.getElementById('btnApprove').addEventListener('click', () => {
 });
 
 // Cierre Manual de Emergencia (Bloque 1 item 6, Bloque 4 item 3)
-window.forceClosePosition = function() {
+window.forceClosePosition = function(event) {
+    if (event) {
+        event.stopPropagation?.();
+        event.preventDefault?.();
+    }
     const pos = getOpenPosition();
     if (pos) {
         logToTerminal(`⚠️ CIERRE MANUAL: El usuario forzó el cierre de la posición activa en ${pos.symbol}.`, 'error');
@@ -2156,7 +2204,19 @@ window.forceClosePosition = function() {
         copilotState = 'idle';
         isCopilotApprovalPause = false;
 
-        const activePrice = (pos.symbol === currentSymbol) ? currentPrice : (window.positionAssetPrice || pos.entryPrice);
+        let activePrice = 0;
+        if (pos.symbol === currentSymbol && typeof currentPrice === 'number' && currentPrice > 0) {
+            activePrice = currentPrice;
+        } else if (typeof window.positionAssetPrice === 'number' && window.positionAssetPrice > 0) {
+            activePrice = window.positionAssetPrice;
+        } else if (typeof pos.entryPrice === 'number' && pos.entryPrice > 0) {
+            activePrice = pos.entryPrice;
+        } else {
+            activePrice = 1;
+        }
+
+        // Liberar mutex para asegurar que la orden manual no sea bloqueada por una verificación concurrente
+        isExecutingTrade = false;
         executeTrade('VENDER', pos.symbol, pos.baseCoin, activePrice, 'Manual');
         
         if (isAgentActive) {
@@ -2167,6 +2227,7 @@ window.forceClosePosition = function() {
         logToTerminal(`ℹ️ No hay posición abierta que cerrar.`, 'info');
     }
 };
+window.cerrarPosicion = window.forceClosePosition;
 
 // Control de Apagado Programado (Graceful Shutdown)
 window.toggleStopAfterClose = function() {
@@ -2315,6 +2376,10 @@ function updateBrainBadge() {
         if(statusBadge) statusBadge.className += "bg-blue-900 text-blue-300 border-blue-500";
         if(orquestadorBox) orquestadorBox.className += "bg-gray-800 border-blue-500 shadow-blue-500/20";
         if(brainIcon) brainIcon.style.filter = "drop-shadow(0 0 5px #3b82f6)";
+    } else if (value === 'qwen') {
+        if(statusBadge) statusBadge.className += "bg-emerald-900 text-emerald-300 border-emerald-500";
+        if(orquestadorBox) orquestadorBox.className += "bg-gray-800 border-emerald-500 shadow-emerald-500/20";
+        if(brainIcon) brainIcon.style.filter = "drop-shadow(0 0 5px #10b981)";
     } else if (value === 'ollama') {
         if(statusBadge) statusBadge.className += "bg-gray-700 text-gray-300 border-gray-500";
         if(orquestadorBox) orquestadorBox.className += "bg-gray-700 border-gray-500";
@@ -2637,19 +2702,34 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- PROTOCOLO DE PURGA Y CONTROL DE MEMORIA RAM DE OLLAMA ---
 window.purgarMemoriaIA = async function(silent = false) {
     if (!silent) logToTerminal("🧹 [PURGA RAM] Desalojando modelos y cancelando tareas en Ollama...", "warn");
+    const lobby = document.getElementById("lobbyView");
+    const isLobbyVisible = lobby && !lobby.classList.contains("hidden");
+    const lobbyReportBox = document.getElementById("lobbyReportBox");
+    if (!silent && isLobbyVisible && lobbyReportBox) {
+        lobbyReportBox.classList.remove("hidden");
+        lobbyReportBox.innerHTML = '<span class="text-yellow-400 font-bold animate-pulse">🧹 Purgando procesos colgados y desalojando modelos de la memoria RAM...</span>';
+    }
     try {
         const res = await fetch(`${API_BASE_URL}/api/ollama/purge`, { method: "POST" });
         const data = await res.json();
         const modelsList = (data.unloaded_models && data.unloaded_models.length > 0)
             ? data.unloaded_models.join(", ")
-            : "Ninguno activo";
+            : "Ninguno en ejecución";
         if (!silent) {
             logToTerminal(`✅ [PURGA RAM] Memoria liberada. Modelos purgados de RAM: ${modelsList}`, "success");
+            if (isLobbyVisible && lobbyReportBox) {
+                lobbyReportBox.innerHTML = `<span class="text-green-400 font-bold">✅ Memoria RAM liberada con éxito. Modelos desalojados de Ollama: <strong>${escapeHtml(modelsList)}</strong></span>`;
+            }
         } else {
             logToTerminal(`🔄 [AUTO-PURGA] Memoria de Ollama liberada para el nuevo motor (${modelsList}).`, "info");
         }
     } catch (err) {
-        if (!silent) logToTerminal(`⚠️ [PURGA RAM] Error de conexión al purgar Ollama: ${err.message}`, "error");
+        if (!silent) {
+            logToTerminal(`⚠️ [PURGA RAM] Error de conexión al purgar Ollama: ${err.message}`, "error");
+            if (isLobbyVisible && lobbyReportBox) {
+                lobbyReportBox.innerHTML = `<span class="text-red-400 font-bold">⚠️ Error al purgar memoria: ${escapeHtml(err.message)}</span>`;
+            }
+        }
     }
 };
 
@@ -2892,6 +2972,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 mainSymbolSelect.value = chosenSymbol;
                 // Disparar evento de cambio para que la app reaccione
                 mainSymbolSelect.dispatchEvent(new Event('change'));
+            }
+
+            // Sincronizar el motor IA seleccionado en el lobby con el selector principal
+            const chosenEngine = document.getElementById("lobbyEngineSelect")?.value;
+            const mainEngineSelect = document.getElementById("engineSelect");
+            if (chosenEngine && mainEngineSelect && mainEngineSelect.querySelector(`option[value="${chosenEngine}"]`)) {
+                mainEngineSelect.value = chosenEngine;
+                mainEngineSelect.dispatchEvent(new Event('change'));
             }
             
             // Inyectar el consenso pre-market en la Caja de Mando para el Orquestador (recortado a 300 caracteres, Bloque 6 item 7)

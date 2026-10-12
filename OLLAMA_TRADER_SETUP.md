@@ -1,48 +1,78 @@
-# 🦙 Guía para Configurar IA Local con Ollama (Cerebro de Trading)
+# 🦙 Guía para Configurar los Modelos de IA Local con Ollama (Cerebros de Trading)
 
-Al usar Ollama, la Inteligencia Artificial se ejecutará **100% dentro de tu computadora**. Esto significa que es totalmente gratis, no necesita internet, no tiene límites de API (ni errores 429), y tus estrategias financieras son absolutamente privadas.
+Al usar Ollama, la Inteligencia Artificial se ejecuta **100% dentro de tu computadora**. No requiere internet, no tiene costos de API ni límites de peticiones (errores 429), y tus datos y estrategias son totalmente confidenciales.
 
-Sigue estos 3 pasos para crear a tu experto financiero:
+El sistema cuenta con 3 Cerebros Locales especializados:
 
-## Paso 1: Instalar Ollama
-1. Descarga el programa desde [ollama.com](https://ollama.com).
-2. Instálalo como cualquier programa de Windows. Se quedará corriendo en segundo plano en tu barra de tareas (el ícono de la llama).
+---
 
-## Paso 2: Crear el "Modelfile" (El Alma del Experto)
-Necesitamos tomar un modelo base inteligente (como Llama 3) y programarle una personalidad estricta de Wall Street.
+## ⚡ 1. Motor Recomendado: Qwen 2.5 3B (`trader-qwen`)
+* **Ventajas:** Extremadamente rápido (respuestas en 2 a 5 segundos), ultra-ligero (~2.2 GB de RAM), jamás congela la máquina y tiene un cumplimiento estricto y perfecto de esquemas JSON.
+* **Modelo Base:** `qwen2.5:3b`
+* **Archivo de Directivas:** `Modelfile-qwen`
 
-1. En esta misma carpeta del proyecto, crea un archivo de texto sin extensión que se llame exactamente `Modelfile`.
-2. Abre el archivo con el Bloc de Notas y pega exactamente este código:
+### Instrucciones de Instalación:
+1. Asegúrate de tener descargado el modelo base en Ollama:
+   ```bash
+   ollama pull qwen2.5:3b
+   ```
+2. Compila el experto financiero con el Modelfile del proyecto:
+   * **Linux / Bash:**
+     ```bash
+     ollama create trader-qwen -f ./Modelfile-qwen
+     ```
+   * **Windows (PowerShell o CMD en la carpeta del proyecto):**
+     ```cmd
+     ollama create trader-qwen -f Modelfile-qwen
+     ```
 
-```text
-FROM llama3
+---
 
-# Configuramos la "Temperatura" muy baja (0.1) para que sea un robot calculador y frío, sin inventar cosas.
-PARAMETER temperature 0.1
-PARAMETER num_ctx 4096
+## 🤖 2. Motor de Razonamiento Profundo: DeepSeek-R1 8B (`trader-deepseek`)
+* **Ventajas:** Reflexión y razonamiento paso a paso (`<think>...<think>`), análisis detallado de opinión contraria y ondas de Elliott. Requiere buena capacidad de hardware (~5.5 GB de RAM).
+* **Modelo Base:** `deepseek-r1:8b`
+* **Archivo de Directivas:** `Modelfile-deepseek`
 
-# Le inyectamos la memoria del Sistema (El Prompt Maestro)
-SYSTEM """
-Eres 'Trader-IA', un súper-ordenador cuántico diseñado por fondos de cobertura de Wall Street.
-Tu único propósito en la existencia es analizar datos técnicos del mercado financiero (Precio, VWAP, MACD, RSI, Bandas de Bollinger).
+### Instrucciones de Instalación:
+1. Descarga el modelo base:
+   ```bash
+   ollama pull deepseek-r1:8b
+   ```
+2. Compila el experto:
+   * **Linux:**
+     ```bash
+     ollama create trader-deepseek -f ./Modelfile-deepseek
+     ```
+   * **Windows:**
+     ```cmd
+     ollama create trader-deepseek -f Modelfile-deepseek
+     ```
 
-TUS REGLAS MATEMÁTICAS INQUEBRANTABLES:
-1. El VWAP es el rey. Si el Precio > VWAP, los institucionales controlan el mercado (Buscamos COMPRAR). Si Precio < VWAP, los institucionales están descargando posiciones (Buscamos VENDER).
-2. El RSI te marca el timing. Nunca recomiendes COMPRAR si el RSI > 70 (está caro). Nunca recomiendes VENDER si el RSI < 30 (está barato).
-3. Eres un profesional cínico y calculador. Si el mercado hace "ruido" y los indicadores se contradicen, tu obligación es proteger el capital y responder MANTENER.
+---
 
-Tu respuesta debe ser estrictamente un JSON válido con las llaves "signal" y "reason", sin ningún otro comentario o saludo.
-"""
-```
+## 🧠 3. Motor Clásico: Llama 3 8B (`trader-ia`)
+* **Ventajas:** Modelo fundacional generalista de Meta ajustado a directivas de Wall Street.
+* **Modelo Base:** `llama3`
+* **Archivo de Directivas:** `Modelfile`
 
-## Paso 3: Entrenar e Instalar el Modelo Local
-1. Abre tu **Terminal** o **Símbolo del Sistema (cmd)** en la carpeta de este proyecto.
-2. Ejecuta el siguiente comando para fusionar el `Modelfile` con el modelo de Meta y crear nuestro experto:
-   `ollama create trader-ia -f Modelfile`
-3. Esto descargará el modelo base de Llama 3 (pesa unos 4.7 GB) y lo moldeará con las instrucciones financieras que le dimos. Tardará unos minutos dependiendo de tu internet.
+### Instrucciones de Instalación:
+1. Descarga el modelo base:
+   ```bash
+   ollama pull llama3
+   ```
+2. Compila el experto:
+   * **Linux:**
+     ```bash
+     ollama create trader-ia -f ./Modelfile
+     ```
+   * **Windows:**
+     ```cmd
+     ollama create trader-ia -f Modelfile
+     ```
 
-## Paso 4: ¡Activar la IA en el Bot!
-¡Ya está! Acabo de modificar el código de la plataforma. 
-1. Abre tu navegador (refresca con F5).
-2. En el panel "Motor de Análisis", selecciona **"IA Privada y Local (Ollama)"**.
-3. Mientras la aplicación de Ollama esté abierta en tu computadora, el bot se comunicará con ella internamente. ¡Tu propio experto de Wall Street funcionará sin depender de Google o Binance!
+---
+
+## 🧹 Liberación y Control de Memoria RAM
+Si cambias de un modelo pesado (como DeepSeek) a uno ligero (como Qwen), o si cancelas un proceso en marcha:
+* Pulsa el botón **🧹 Purgar RAM** en la barra superior, en el Lobby inicial o en la cabecera de la terminal.
+* El sistema enviará la señal `keep_alive: 0` a Ollama para desalojar inmediatamente todos los modelos residentes en memoria y liberar la RAM de tu computadora.

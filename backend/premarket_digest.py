@@ -192,9 +192,16 @@ Debes responder ÚNICAMENTE en formato JSON válido estricto, sin markdown ni ex
         if cancel_event and cancel_event.is_set():
             return {"status": "cancelled", "message": "Proceso Pre-Market cancelado antes de iniciar inferencia."}
 
-        model_name = "trader-deepseek" if engine == "deepseek" else "trader-ia"
-        # Sin restricción de tiempo rígida para DeepSeek: timeout=None (trabaja hasta que complete su razonamiento)
-        timeout_sec = None if engine == "deepseek" else 120
+        if engine == "deepseek":
+            model_name = "trader-deepseek"
+            timeout_sec = None
+        elif engine == "qwen":
+            model_name = "trader-qwen"
+            timeout_sec = 60
+        else:
+            model_name = "trader-ia"
+            timeout_sec = 120
+
         payload = {
             "model": model_name,
             "prompt": prompt,
@@ -206,6 +213,10 @@ Debes responder ÚNICAMENTE en formato JSON válido estricto, sin markdown ni ex
 
         try:
             response = requests.post("http://localhost:11434/api/generate", json=payload, timeout=timeout_sec)
+            if response.status_code == 404 and engine == "qwen":
+                payload["model"] = "qwen2.5:3b"
+                model_name = "qwen2.5:3b"
+                response = requests.post("http://localhost:11434/api/generate", json=payload, timeout=timeout_sec)
             
             if cancel_event and cancel_event.is_set():
                 return {"status": "cancelled", "message": "Proceso Pre-Market cancelado por el operador."}

@@ -75,15 +75,19 @@
             <p class="text-gray-400 mb-6">Antes de iniciar operaciones automáticas, lee el reporte del Agente de Inversiones sobre el fin de semana para decidir el mercado adecuado.</p>
             
             <!-- Selector de Motor IA para Pre-Market -->
-            <div class="flex flex-col sm:flex-row justify-center items-center gap-3 mb-6 max-w-md mx-auto bg-gray-900/80 p-3 rounded-lg border border-gray-700">
+            <div class="flex flex-col sm:flex-row justify-center items-center gap-3 mb-6 max-w-lg mx-auto bg-gray-900/80 p-3 rounded-lg border border-gray-700">
                 <label for="lobbyEngineSelect" class="text-xs text-gray-300 font-bold whitespace-nowrap flex items-center gap-1.5">
                     <span>🧠</span> Cerebro Pre-Market:
                 </label>
-                <select id="lobbyEngineSelect" class="bg-gray-800 text-white text-xs p-2 rounded border border-gray-600 outline-none w-full sm:w-64 cursor-pointer font-semibold">
-                    <option value="deepseek" selected>🤖 DeepSeek-R1 (Razonamiento Profundo)</option>
+                <select id="lobbyEngineSelect" class="bg-gray-800 text-white text-xs p-2 rounded border border-gray-600 outline-none w-full sm:w-60 cursor-pointer font-semibold">
+                    <option value="qwen" class="text-emerald-400 font-bold" selected>⚡ Qwen 2.5 3B (Ultrarrápido y Preciso)</option>
+                    <option value="deepseek">🤖 DeepSeek-R1 (Razonamiento Profundo)</option>
                     <option value="ollama">🧠 Ollama Base / Llama 3 (Rápido)</option>
                     <option value="gemini">☁️ Google Gemini (Nube)</option>
                 </select>
+                <button onclick="window.purgarMemoriaIA()" class="text-xs bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-700/60 px-3 py-2 rounded font-semibold transition flex items-center justify-center gap-1.5 shadow whitespace-nowrap w-full sm:w-auto" title="Liberar memoria RAM de Ollama y cancelar procesos colgados antes de iniciar">
+                    <span>🧹</span> Purgar RAM
+                </button>
             </div>
 
             <div class="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
@@ -449,6 +453,7 @@
                         <label class="text-xs text-gray-400 mb-1 block">Motor de Análisis (Cerebro IA):</label>
                         <select id="engineSelect" class="w-full bg-gray-900 text-white text-sm rounded p-1.5 border border-gray-700 cursor-pointer relative z-20 mb-3">
                             <option value="local">⚙️ Modelo Matemático Local</option>
+                            <option value="qwen" class="text-emerald-400 font-bold">⚡ Qwen 2.5 (3B Ultrarrápido)</option>
                             <option value="deepseek" class="text-blue-400 font-bold">🤖 DeepSeek-R1 (Razonamiento)</option>
                             <option value="ollama" class="text-gray-300 font-bold" selected>🤖 IA Privada Base (Ollama)</option>
                             <option value="ai" class="text-purple-400 font-bold">✨ Inteligencia Artificial (Gemini)</option>
@@ -765,7 +770,7 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=18"></script>
+    <script src="js/app.js?v=22"></script>
     </div>
 </body>
 </html>

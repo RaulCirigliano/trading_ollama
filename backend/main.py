@@ -434,13 +434,17 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
             if not acquired:
                 return [{"asset": "BUSY", "type": "Peligro", "confidence": 0, "reason": "Ollama ocupado", "schedule": "-"}]
             try:
+                opp_model = "trader-qwen" if engine == "qwen" else ("trader-deepseek" if engine == "deepseek" else "trader-ia")
                 payload = {
-                    "model": "trader-ia",
+                    "model": opp_model,
                     "prompt": prompt,
                     "stream": False,
                     "format": "json"
                 }
                 res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=120)
+                if res.status_code == 404 and engine == "qwen":
+                    payload["model"] = "qwen2.5:3b"
+                    res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=120)
                 if res.status_code == 200:
                     resp_json = res.json().get("response", "[]")
                     json_match = re.search(r'\[.*\]', resp_json, re.DOTALL)
@@ -511,7 +515,7 @@ def purge_ollama_models() -> List[str]:
         pass
     
     # Fallback asegurado para todos los modelos conocidos de trading si /api/ps falló o no los reportó
-    for fallback_name in ["trader-deepseek", "trader-ia", "qwen2.5:3b", "deepseek-r1:8b", "deepseek-r1:1.5b", "llama3:latest"]:
+    for fallback_name in ["trader-deepseek", "trader-ia", "trader-qwen", "qwen2.5:3b", "deepseek-r1:8b", "deepseek-r1:1.5b", "llama3:latest"]:
         if fallback_name not in unloaded:
             try:
                 requests.post("http://localhost:11434/api/generate", json={"model": fallback_name, "keep_alive": 0}, timeout=2)
@@ -994,6 +998,75 @@ def get_analysis(
                 except Exception as e:
                     signal = "ERROR"
                     reason = f"Ollama no responde: {str(e)}"
+                finally:
+                    OLLAMA_LOCK.release()
+
+        # --- MOTOR 5: QWEN 2.5 (VÍA OLLAMA) CON OLLAMA_LOCK ---
+        elif engine == "qwen":
+            import requests
+            import json
+
+            acquired = OLLAMA_LOCK.acquire(timeout=60)
+            if not acquired:
+                signal = "ERROR"
+                reason = "Ollama ocupado."
+            else:
+                try:
+                    pos_info = f"Posición abierta a ${entry_price}." if has_position else "Sin posición."
+                    macro_block = build_macro_directive(macro)
+                    prompt_text = f'''
+                    Eres un Senior Quantitative Trader Institucional operando algorítmicamente.
+                    Mercado: {symbol}. Velas: {timeframe}. Riesgo: {int(risk * 100)}%. TP Neto: +{tp}%. SL Neto: -{sl}%.
+                    Comisión Broker: {fee}% por orden ({round_trip_fee}% ida y vuelta). Ganancia neta esperada = tp (+{tp}%).
+                    Estado de Posición: {pos_info}
+
+                    DATOS TÉCNICOS:
+                    - Precio: ${price_val} | VWAP: ${round(vwap_val, 2) if not pd.isna(vwap_val) else "N/A"} | RSI: {rsi_val}
+                    - MACD: {round(latest['macd_diff'], 2) if not pd.isna(latest['macd_diff']) else "N/A"}
+                    - Bollinger: Inf=${round(bb_low, 2) if not pd.isna(bb_low) else "N/A"}, Sup=${round(bb_high, 2) if not pd.isna(bb_high) else "N/A"}
+                    - Sentimiento: {sentiment}
+
+                    CONTEXTO MACRO:
+                    {macro_block}
+
+                    REGLAS ANTI-OVERTRADING:
+                    - Si hay posición abierta, responde MANTENER o VENDER. Prohibido COMPRAR con posición abierta.
+                    - Si no hay posición, compra solo si la rentabilidad cubre holgadamente comisiones ({round_trip_fee}%).
+
+                    Responde EXCLUSIVAMENTE con este formato JSON y NADA MAS:
+                    {{"signal": "COMPRAR", "reason": "Justificacion breve combinando datos y contexto."}}
+                    '''
+
+                    payload = {
+                        "model": "trader-qwen",
+                        "prompt": prompt_text,
+                        "stream": False,
+                        "format": "json"
+                    }
+                    res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=60)
+                    if res.status_code == 404:
+                        payload["model"] = "qwen2.5:3b"
+                        res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=60)
+
+                    if res.status_code == 200:
+                        respuesta = res.json().get("response", "")
+                        json_match = re.search(r'\{.*\}', respuesta, re.DOTALL)
+                        if json_match:
+                            ia_decision = json.loads(json_match.group(0))
+                            signal = normalize_signal(ia_decision.get("signal", "MANTENER"))
+                            reason = str(ia_decision.get("reason", "Decisión procesada por Qwen 2.5."))
+                        else:
+                            signal = "MANTENER"
+                            reason = "Qwen no devolvió una estructura JSON válida."
+                    else:
+                        signal = "ERROR"
+                        reason = f"Error del servidor Ollama (Qwen): HTTP {res.status_code}."
+                except requests.exceptions.Timeout:
+                    signal = "ERROR"
+                    reason = "Timeout del motor Qwen (60s)."
+                except Exception as e:
+                    signal = "ERROR"
+                    reason = f"Qwen no responde: {str(e)}"
                 finally:
                     OLLAMA_LOCK.release()
 
