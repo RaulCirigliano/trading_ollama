@@ -22,45 +22,61 @@
         <div class="flex items-center space-x-4">
             <div class="bg-gray-900 px-3 py-1 rounded-lg border border-gray-700 flex items-center mr-4">
                 <span class="text-xs text-gray-400 uppercase mr-2 font-bold">Activo:</span>
-                <select id="symbolSelect" class="bg-transparent text-white font-bold outline-none cursor-pointer">
-                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Criptomonedas --</option>
-                    <option class="bg-gray-800" value="BTC/USDT">BTC / USDT</option>
-                    <option class="bg-gray-800" value="ETH/USDT">ETH / USDT</option>
-                    <option class="bg-gray-800" value="SOL/USDT">SOL / USDT</option>
-                    
-                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Mercados Tradicionales --</option>
-                    <option class="bg-gray-800" value="SPY">S&P 500 (SPY)</option>
-                    <option class="bg-gray-800" value="QQQ">Nasdaq 100 (QQQ)</option>
-                    <option class="bg-gray-800" value="GC=F">Oro Físico (GC=F)</option>
+                <select id="symbolSelect" class="bg-transparent text-white font-bold outline-none cursor-pointer max-w-[260px] truncate">
+                    <optgroup label="🛢️ Materias Primas y Energía" class="bg-gray-800 text-amber-400 font-bold">
+                        <option class="bg-gray-900 text-white font-semibold" value="CL=F">🛢️ Petróleo WTI (CL=F)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="GC=F">🥇 Oro (GC=F)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="SI=F">🥈 Plata (SI=F)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="NG=F">🔥 Gas Natural (NG=F)</option>
+                    </optgroup>
 
-                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Mercado Argentino --</option>
-                    <option class="bg-gray-800" value="GGAL.BA">Grupo Financiero Galicia (GGAL)</option>
-                    <option class="bg-gray-800" value="YPFD.BA">YPF / Vaca Muerta (YPFD)</option>
-                    <option class="bg-gray-800" value="PAMP.BA">Pampa Energía (PAMP)</option>
-                    <option class="bg-gray-800" value="BMA.BA">Banco Macro (BMA)</option>
-                    <option class="bg-gray-800" value="ALUA.BA">Aluar Aluminio (ALUA)</option>
-                    <option class="bg-gray-800" value="TXAR.BA">Ternium Argentina (TXAR)</option>
+                    <optgroup label="⚡ Criptomonedas" class="bg-gray-800 text-yellow-400 font-bold">
+                        <option class="bg-gray-900 text-white font-semibold" value="BTC/USDT" selected>⚡ Bitcoin (BTC / USDT)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="ETH/USDT">⚡ Ethereum (ETH / USDT)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="SOL/USDT">⚡ Solana (SOL / USDT)</option>
+                    </optgroup>
 
-                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Acciones Destacadas --</option>
-                    <option class="bg-gray-800" value="AAPL">Apple (AAPL)</option>
-                    <option class="bg-gray-800" value="TSLA">Tesla (TSLA)</option>
-                    <option class="bg-gray-800" value="MSFT">Microsoft (MSFT)</option>
+                    <optgroup label="🏛️ Bonos e Índices Macro" class="bg-gray-800 text-blue-400 font-bold">
+                        <option class="bg-gray-900 text-white font-semibold" value="TLT">🏛️ Bonos Tesoro EE.UU. 20+ Años (TLT)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="^GSPC">📈 S&P 500 - Índice (^GSPC)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="SPY">📊 S&P 500 - ETF Operable (SPY)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="QQQ">💻 Nasdaq 100 - ETF (QQQ)</option>
+                    </optgroup>
 
-                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- China y Emergentes --</option>
-                    <option class="bg-gray-800" value="MCHI">ETF Mercado Chino (MCHI)</option>
-                    <option class="bg-gray-800" value="KWEB">ETF Internet China (KWEB)</option>
+                    <optgroup label="🏢 Acciones / Empresas Globales" class="bg-gray-800 text-purple-400 font-bold">
+                        <option class="bg-gray-900 text-white font-semibold" value="BABA">🏢 Alibaba (BABA)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="NVDA">🤖 Nvidia (NVDA)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="AAPL">🍎 Apple (AAPL)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="TSLA">🚗 Tesla (TSLA)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="MSFT">🪟 Microsoft (MSFT)</option>
+                    </optgroup>
 
-                    <option class="bg-gray-800 text-yellow-400 font-bold" disabled>-- Inteligencia Artificial --</option>
-                    <option class="bg-gray-800" value="BOTZ">ETF Robótica y AI (BOTZ)</option>
-                    <option class="bg-gray-800" value="NVDA">NVIDIA Corp. (NVDA)</option>
+                    <optgroup label="🇦🇷 Mercado Argentino (Acciones / CEDEARs)" class="bg-gray-800 text-cyan-400 font-bold">
+                        <option class="bg-gray-900 text-white font-semibold" value="GGAL.BA">🇦🇷 Grupo Fin. Galicia (GGAL)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="YPFD.BA">🇦🇷 YPF / Vaca Muerta (YPFD)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="PAMP.BA">🇦🇷 Pampa Energía (PAMP)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="BMA.BA">🇦🇷 Banco Macro (BMA)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="ALUA.BA">🇦🇷 Aluar Aluminio (ALUA)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="TXAR.BA">🇦🇷 Ternium Argentina (TXAR)</option>
+                    </optgroup>
+
+                    <optgroup label="🌐 ETFs Temáticos y Emergentes" class="bg-gray-800 text-emerald-400 font-bold">
+                        <option class="bg-gray-900 text-white font-semibold" value="MCHI">🇨🇳 ETF Mercado Chino (MCHI)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="KWEB">🇨🇳 ETF Internet China (KWEB)</option>
+                        <option class="bg-gray-900 text-white font-semibold" value="BOTZ">🤖 ETF Robótica y AI (BOTZ)</option>
+                    </optgroup>
                 </select>
             </div>
             <span class="text-gray-400 text-sm hidden md:inline">Billetera Activa:</span>
             <span id="capitalDisplay" class="font-mono text-green-400 hidden md:inline font-bold px-2 py-1 bg-gray-900 rounded border border-gray-700">$0.00</span>
-            <button onclick="window.resetearCuenta()" class="text-xs text-gray-500 hover:text-white mr-2 hidden md:inline" title="Reiniciar Billeteras">🔄</button>
-            <button onclick="window.purgarMemoriaIA()" class="text-xs bg-red-900/40 hover:bg-red-800 text-red-300 border border-red-700/50 px-2 py-1 rounded font-semibold transition hidden sm:inline-flex items-center gap-1 shadow mr-4" title="Desalojar modelos de Ollama de la RAM y cancelar tareas colgadas">
-                <span>🧹</span> Purgar RAM
-            </button>
+            <div class="flex items-center space-x-1.5 bg-gray-900 p-1 rounded-lg border border-gray-700">
+                <label for="navAgentModeSelect" class="text-xs text-gray-400 uppercase font-bold px-1 hidden sm:inline">Modo:</label>
+                <select id="navAgentModeSelect" class="bg-gray-800 text-white font-semibold text-xs p-1.5 rounded border border-gray-600 outline-none cursor-pointer">
+                    <option value="fixed" selected>🎯 Fijo (Activo Actual)</option>
+                    <option value="smart">🧠 Modo Inteligente (Multi-Activo)</option>
+                </select>
+            </div>
+            <span id="smartRoutingBadge" class="hidden text-[11px] bg-purple-900/80 text-purple-200 border border-purple-500/80 px-2 py-1 rounded font-mono font-bold animate-pulse shadow-[0_0_10px_rgba(168,85,247,0.4)]">⚡ MODO INTELIGENTE</span>
             <button id="agentToggle" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold transition">
                 Activar Agente
             </button>
@@ -110,12 +126,49 @@
                 <div>
                     <label class="block text-xs text-gray-400 mb-1 text-left">Activo a Operar:</label>
                     <!-- Moveremos o clonaremos el selector aquí por JS -->
-                    <select id="lobbySymbolSelect" class="bg-gray-900 text-white p-2 rounded border border-gray-600 outline-none w-64">
-                        <option value="BTC/USDT">BTC / USDT</option>
-                        <option value="ETH/USDT">ETH / USDT</option>
-                        <option value="AAPL">Apple (AAPL)</option>
-                        <option value="SPY">S&P 500 (SPY)</option>
-                        <option value="GC=F">Oro Físico (GC=F)</option>
+                    <select id="lobbySymbolSelect" class="bg-gray-900 text-white p-2.5 rounded border border-gray-600 outline-none w-80 font-medium">
+                        <optgroup label="🛢️ Materias Primas y Energía" class="bg-gray-800 text-amber-400 font-bold">
+                            <option class="bg-gray-900 text-white font-semibold" value="CL=F">🛢️ Petróleo WTI (CL=F)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="GC=F">🥇 Oro (GC=F)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="SI=F">🥈 Plata (SI=F)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="NG=F">🔥 Gas Natural (NG=F)</option>
+                        </optgroup>
+
+                        <optgroup label="⚡ Criptomonedas" class="bg-gray-800 text-yellow-400 font-bold">
+                            <option class="bg-gray-900 text-white font-semibold" value="BTC/USDT" selected>⚡ Bitcoin (BTC / USDT)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="ETH/USDT">⚡ Ethereum (ETH / USDT)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="SOL/USDT">⚡ Solana (SOL / USDT)</option>
+                        </optgroup>
+
+                        <optgroup label="🏛️ Bonos e Índices Macro" class="bg-gray-800 text-blue-400 font-bold">
+                            <option class="bg-gray-900 text-white font-semibold" value="TLT">🏛️ Bonos Tesoro EE.UU. 20+ Años (TLT)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="^GSPC">📈 S&P 500 - Índice (^GSPC)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="SPY">📊 S&P 500 - ETF Operable (SPY)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="QQQ">💻 Nasdaq 100 - ETF (QQQ)</option>
+                        </optgroup>
+
+                        <optgroup label="🏢 Acciones / Empresas Globales" class="bg-gray-800 text-purple-400 font-bold">
+                            <option class="bg-gray-900 text-white font-semibold" value="BABA">🏢 Alibaba (BABA)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="NVDA">🤖 Nvidia (NVDA)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="AAPL">🍎 Apple (AAPL)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="TSLA">🚗 Tesla (TSLA)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="MSFT">🪟 Microsoft (MSFT)</option>
+                        </optgroup>
+
+                        <optgroup label="🇦🇷 Mercado Argentino (Acciones / CEDEARs)" class="bg-gray-800 text-cyan-400 font-bold">
+                            <option class="bg-gray-900 text-white font-semibold" value="GGAL.BA">🇦🇷 Grupo Fin. Galicia (GGAL)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="YPFD.BA">🇦🇷 YPF / Vaca Muerta (YPFD)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="PAMP.BA">🇦🇷 Pampa Energía (PAMP)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="BMA.BA">🇦🇷 Banco Macro (BMA)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="ALUA.BA">🇦🇷 Aluar Aluminio (ALUA)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="TXAR.BA">🇦🇷 Ternium Argentina (TXAR)</option>
+                        </optgroup>
+
+                        <optgroup label="🌐 ETFs Temáticos y Emergentes" class="bg-gray-800 text-emerald-400 font-bold">
+                            <option class="bg-gray-900 text-white font-semibold" value="MCHI">🇨🇳 ETF Mercado Chino (MCHI)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="KWEB">🇨🇳 ETF Internet China (KWEB)</option>
+                            <option class="bg-gray-900 text-white font-semibold" value="BOTZ">🤖 ETF Robótica y AI (BOTZ)</option>
+                        </optgroup>
                     </select>
                 </div>
 
@@ -366,13 +419,13 @@
                     </h2>
                 </div>
                 <div class="text-sm text-gray-300">
-                    <p class="mb-3">El rendimiento de la Inteligencia Artificial y los algoritmos Cuantitativos depende 100% del volumen del mercado elegido. Cada activo tiene un reloj interno. Operar fuera de sus horarios fuertes genera señales falsas. Presta atención a estos horarios <strong>(Hora de Argentina)</strong>:</p>
+                    <p class="mb-3">El rendimiento del Agente de IA y los modelos cuantitativos depende del volumen y horario de cada mercado. Conoce la clasificación de activos para elegir con precisión:</p>
                     <ul class="list-disc pl-5 space-y-2">
-                        <li><span class="text-blue-400 font-bold">🇺🇸 Wall Street (NASDAQ, S&P 500, Apple, Tesla, NVDA, BOTZ):</span> Lunes a Viernes de <strong>10:30 AM a 17:00 PM ARG</strong>. Es cuando los fondos de inversión inyectan trillones de dólares. Durante la noche y fines de semana la bolsa cierra y el gráfico quedará congelado.</li>
-                        <li><span class="text-red-400 font-bold">🇨🇳 Mercados Chinos (MCHI, KWEB):</span> Su pico de mayor liquidez es durante la madrugada en la Sesión Asiática <strong>(22:30 PM - 04:00 AM ARG)</strong>. Operarlos al mediodía es ineficiente.</li>
-                        <li><span class="text-yellow-400 font-bold">🥇 Oro Físico (GC=F):</span> Activo de refugio global. Opera casi 24hs en la semana, pero los movimientos bruscos y predecibles ocurren cuando despiertan Londres y Nueva York <strong>(04:00 AM - 14:00 PM ARG)</strong>.</li>
-                        <li><span class="text-orange-400 font-bold">🪙 Criptomonedas (BTC, ETH, SOL):</span> Operan 24/7, pero el bot es mucho más certero de Lunes a Viernes. <strong class="text-red-400">Evita los Fines de Semana (Sáb-Dom)</strong>: el volumen bancario desaparece, dejando "Ruido Lateral" que engaña a las matemáticas.</li>
-                        <li><span class="text-blue-300 font-bold">🇦🇷 Mercado Argentino (YPF, Pampa, Bancos, Aluar):</span> Lunes a Viernes de <strong>11:00 AM a 17:00 PM ARG</strong>. El mercado local suele estar fuertemente influenciado por noticias macroeconómicas locales (Dólar CCL, regulaciones, etc.). Operar exclusivamente en este horario de liquidez local.</li>
+                        <li><span class="text-amber-400 font-bold">🛢️ Materias Primas y Energía (CL=F Petróleo WTI, GC=F Oro, SI=F Plata, NG=F Gas Natural):</span> Activos físicos y refugio macroeconómico. Operan en futuros casi 24hs en la semana, con su mayor volumen y direccionalidad en las aperturas de Londres y Nueva York <strong>(04:00 AM - 14:00 PM ARG)</strong>.</li>
+                        <li><span class="text-yellow-400 font-bold">⚡ Criptomonedas (BTC Bitcoin, ETH Ethereum, SOL Solana):</span> Operan 24/7 con liquidaciones en USDT. Recomendado operar en días hábiles (Lunes a Viernes) para capturar el flujo institucional real; evitar fines de semana de bajo volumen.</li>
+                        <li><span class="text-blue-400 font-bold">🏛️ Bonos e Índices Macro (^GSPC / SPY S&P 500, QQQ Nasdaq 100, TLT Bonos Tesoro EE.UU.):</span> Marcan el termómetro del dinero institucional y las tasas de interés. Horario clave: Lunes a Viernes de <strong>10:30 AM a 17:00 PM ARG</strong>.</li>
+                        <li><span class="text-purple-400 font-bold">🏢 Empresas Globales y Tech (AAPL Apple, NVDA Nvidia, TSLA Tesla, BABA Alibaba, MSFT):</span> Alta volatilidad y sensibilidad a balances y noticias. Siguen el horario de Wall Street <strong>(10:30 AM a 17:00 PM ARG)</strong> y sesión asiática para BABA.</li>
+                        <li><span class="text-cyan-400 font-bold">🇦🇷 Mercado Local (GGAL, YPFD, PAMP, BMA, ALUA, TXAR):</span> Lunes a Viernes de <strong>11:00 AM a 17:00 PM ARG</strong>. Sensibles a liquidez local y cotización del Dólar CCL.</li>
                     </ul>
                 </div>
             </div>
@@ -420,10 +473,12 @@
                             <span id="roundTripBadge" class="text-[10px] bg-yellow-500/10 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/30 font-mono">Round-Trip: 0.20%</span>
                         </div>
                         <select id="brokerFeeSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="0.02">0.02% (Acciones / ETFs EE.UU. - IBKR / Alpaca)</option>
+                            <option value="0.00">0.00% (Acciones Comisión Cero - Schwab / Robinhood)</option>
                             <option value="0.10" selected>0.10% (Cripto Spot - Binance / Bybit)</option>
-                            <option value="0.25">0.25% (Acciones EE.UU. / Broker Estándar)</option>
-                            <option value="0.50">0.50% (Bursátil Local / Cedears / Bonos)</option>
-                            <option value="0.00">0.00% (Simulación Cero Comisión)</option>
+                            <option value="0.05">0.05% (Cripto VIP / Futuros Maker)</option>
+                            <option value="0.50">0.50% (Bursátil Local / Cedears / Bonos ARS)</option>
+                            <option value="0.25">0.25% (Broker Tradicional Banca)</option>
                             <option value="custom">Personalizado...</option>
                         </select>
                         <div id="customFeeWrapper" class="hidden mt-1.5 flex items-center space-x-2">
@@ -463,6 +518,7 @@
                         <select id="executionModeSelect" class="w-full bg-gray-900 text-white text-sm rounded p-1.5 border border-gray-700 cursor-pointer relative z-20">
                             <option value="copilot">Modo Copiloto (Preguntar antes de operar)</option>
                             <option value="auto" selected>Trading Autónomo (Ejecutar directo)</option>
+                            <option value="smart">🧠 Modo Inteligente (Auto-Ruteo Multi-Activo)</option>
                         </select>
                     </div>
 
@@ -478,10 +534,25 @@
                                 <h2 class="text-sm font-semibold text-yellow-500">🔭 Radar de Oportunidades (IA)</h2>
                                 <span id="radarLiveStatus" class="text-[10px] bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded border border-gray-500/50 transition-colors">OFF</span>
                             </div>
-                            <label class="relative inline-flex items-center cursor-pointer">
+                            <label class="relative inline-flex items-center cursor-pointer" title="Encender / Apagar Radar">
                                 <input type="checkbox" id="investmentToggle" class="sr-only peer">
                                 <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-600"></div>
                             </label>
+                        </div>
+
+                        <!-- Control de Transferencia a Macro: Manual vs Automático -->
+                        <div class="mb-2.5 p-1.5 bg-gray-800/90 rounded border border-gray-700 flex items-center justify-between">
+                            <span class="text-[11px] text-gray-300 font-semibold flex items-center gap-1">
+                                <span>🔄</span> Pase a Macro:
+                            </span>
+                            <div class="flex items-center space-x-1 bg-gray-900 p-0.5 rounded border border-gray-600 text-[11px]">
+                                <button type="button" id="btnTransferManual" class="px-2 py-0.5 rounded font-bold transition bg-blue-600 text-white shadow cursor-pointer" title="Tú tienes el control: copias, pegas o pulsas 'Aplicar a Macro'">
+                                    ✍️ Manual (Yo)
+                                </button>
+                                <button type="button" id="btnTransferAuto" class="px-2 py-0.5 rounded font-bold transition text-gray-400 hover:text-white cursor-pointer" title="La máquina lo pasa automáticamente a Contexto Macro">
+                                    ⚡ Automático
+                                </button>
+                            </div>
                         </div>
                         <div class="mb-3 flex items-center gap-2">
                             <button id="btnPremarket" class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold transition hidden shadow-md">
@@ -626,15 +697,26 @@
                     </div>
 
                     <!-- Agente de Inversiones (Macro & Radar) -->
-                    <div class="flex justify-between items-start bg-gray-700 p-2 rounded border-l-2 border-yellow-500">
-                        <div class="pr-2">
-                            <p class="text-sm font-semibold text-yellow-500">🔭 Agente de Inversiones</p>
-                            <p class="text-[10px] text-gray-300 mt-1 leading-tight">Investiga noticias, calendarios económicos y eventos globales. Advierte sobre riesgos y genera Tarjetas de Oportunidad con % de confianza. Asesora al Cerebro, no ejecuta.</p>
+                    <div class="flex flex-col bg-gray-700 p-2 rounded border-l-2 border-yellow-500">
+                        <div class="flex justify-between items-start">
+                            <div class="pr-2">
+                                <p class="text-sm font-semibold text-yellow-500">🔭 Agente de Inversiones</p>
+                                <p class="text-[10px] text-gray-300 mt-1 leading-tight">Investiga noticias, calendarios económicos y eventos globales. Advierte sobre riesgos y genera Tarjetas de Oportunidad con % de confianza. Asesora al Cerebro, no ejecuta.</p>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer mt-1">
+                                <input type="checkbox" id="investmentSquadToggle" class="sr-only peer">
+                                <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
+                            </label>
                         </div>
-                        <label class="relative inline-flex items-center cursor-pointer mt-1">
-                            <input type="checkbox" id="investmentSquadToggle" class="sr-only peer">
-                            <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
-                        </label>
+                        <!-- Selector de Fuente para Agente de Inversiones -->
+                        <div class="mt-2 pt-2 border-t border-gray-600/70 flex items-center justify-between text-[11px]">
+                            <span class="text-gray-300 font-medium">Fuente del Informe:</span>
+                            <select id="investmentSourceSelect" class="bg-gray-800 text-yellow-400 font-semibold p-1 rounded border border-gray-600 text-xs outline-none cursor-pointer">
+                                <option value="native">🌐 Nativo (LLM + Web)</option>
+                                <option value="monitor">🖥️ Monitor del Mercado</option>
+                                <option value="hybrid" selected>⚡ Híbrido (Ambos)</option>
+                            </select>
+                        </div>
                     </div>
 
                     <!-- Agente de Riesgo -->

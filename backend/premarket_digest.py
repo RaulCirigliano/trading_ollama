@@ -44,7 +44,7 @@ def validate_llm_digest(data: Any) -> Dict[str, Any]:
         return {"status": "error", "message": "Respuesta inválida del modelo: activos debe ser una lista."}
 
     validados = []
-    symbol_regex = re.compile(r'^[A-Za-z0-9=./\-]{1,15}$')
+    symbol_regex = re.compile(r'^[A-Za-z0-9=./\-\^]{1,15}$')
     valid_consensos = {"ALCISTA", "BAJISTA", "NEUTRAL", "PELIGRO"}
 
     for item in activos_raw[:10]:

@@ -16,6 +16,75 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+// Diccionario de Metadatos y Clasificación de Activos
+const ASSET_METADATA = {
+    // 🛢️ Materias Primas y Energía
+    'CL=F': { name: 'Petróleo WTI', ticker: 'CL=F', icon: '🛢️', category: 'Materias Primas y Energía' },
+    'GC=F': { name: 'Oro', ticker: 'GC=F', icon: '🥇', category: 'Materias Primas y Energía' },
+    'SI=F': { name: 'Plata', ticker: 'SI=F', icon: '🥈', category: 'Materias Primas y Energía' },
+    'NG=F': { name: 'Gas Natural', ticker: 'NG=F', icon: '🔥', category: 'Materias Primas y Energía' },
+
+    // ⚡ Criptomonedas
+    'BTC/USDT': { name: 'Bitcoin', ticker: 'BTC/USDT', icon: '⚡', category: 'Criptomonedas' },
+    'BTC-USD': { name: 'Bitcoin', ticker: 'BTC-USD', icon: '⚡', category: 'Criptomonedas' },
+    'ETH/USDT': { name: 'Ethereum', ticker: 'ETH/USDT', icon: '⚡', category: 'Criptomonedas' },
+    'ETH-USD': { name: 'Ethereum', ticker: 'ETH-USD', icon: '⚡', category: 'Criptomonedas' },
+    'SOL/USDT': { name: 'Solana', ticker: 'SOL/USDT', icon: '⚡', category: 'Criptomonedas' },
+    'SOL-USD': { name: 'Solana', ticker: 'SOL-USD', icon: '⚡', category: 'Criptomonedas' },
+
+    // 🏛️ Bonos e Índices Macro
+    'TLT': { name: 'Bonos Tesoro EE.UU. 20+ Años', ticker: 'TLT', icon: '🏛️', category: 'Bonos e Índices Macro' },
+    '^GSPC': { name: 'S&P 500 (Índice)', ticker: '^GSPC', icon: '📈', category: 'Bonos e Índices Macro' },
+    'SPY': { name: 'S&P 500 (ETF)', ticker: 'SPY', icon: '📊', category: 'Bonos e Índices Macro' },
+    'QQQ': { name: 'Nasdaq 100', ticker: 'QQQ', icon: '💻', category: 'Bonos e Índices Macro' },
+
+    // 🏢 Acciones / Empresas Globales
+    'BABA': { name: 'Alibaba Group', ticker: 'BABA', icon: '🏢', category: 'Empresas Globales' },
+    'NVDA': { name: 'Nvidia Corp.', ticker: 'NVDA', icon: '🤖', category: 'Empresas Globales' },
+    'AAPL': { name: 'Apple Inc.', ticker: 'AAPL', icon: '🍎', category: 'Empresas Globales' },
+    'TSLA': { name: 'Tesla Inc.', ticker: 'TSLA', icon: '🚗', category: 'Empresas Globales' },
+    'MSFT': { name: 'Microsoft Corp.', ticker: 'MSFT', icon: '🪟', category: 'Empresas Globales' },
+
+    // 🇦🇷 Mercado Argentino (Acciones / CEDEARs)
+    'GGAL.BA': { name: 'Grupo Fin. Galicia', ticker: 'GGAL', icon: '🇦🇷', category: 'Mercado Argentino' },
+    'YPFD.BA': { name: 'YPF / Vaca Muerta', ticker: 'YPFD', icon: '🇦🇷', category: 'Mercado Argentino' },
+    'PAMP.BA': { name: 'Pampa Energía', ticker: 'PAMP', icon: '🇦🇷', category: 'Mercado Argentino' },
+    'BMA.BA': { name: 'Banco Macro', ticker: 'BMA', icon: '🇦🇷', category: 'Mercado Argentino' },
+    'ALUA.BA': { name: 'Aluar Aluminio', ticker: 'ALUA', icon: '🇦🇷', category: 'Mercado Argentino' },
+    'TXAR.BA': { name: 'Ternium Argentina', ticker: 'TXAR', icon: '🇦🇷', category: 'Mercado Argentino' },
+
+    // 🌐 ETFs Temáticos y Emergentes
+    'MCHI': { name: 'ETF Mercado Chino', ticker: 'MCHI', icon: '🇨🇳', category: 'China y Emergentes' },
+    'KWEB': { name: 'ETF Internet China', ticker: 'KWEB', icon: '🇨🇳', category: 'China y Emergentes' },
+    'BOTZ': { name: 'ETF Robótica & AI', ticker: 'BOTZ', icon: '🤖', category: 'Inteligencia Artificial' }
+};
+
+function getAssetMeta(symbol) {
+    if (!symbol) return null;
+    const clean = String(symbol).trim();
+    if (ASSET_METADATA[clean]) return ASSET_METADATA[clean];
+    const slashSym = clean.replace('-', '/');
+    if (ASSET_METADATA[slashSym]) return ASSET_METADATA[slashSym];
+    const dashSym = clean.replace('/', '-');
+    if (ASSET_METADATA[dashSym]) return ASSET_METADATA[dashSym];
+    // Coincidencia parcial por ticker base (ej: GGAL)
+    for (const k in ASSET_METADATA) {
+        if (ASSET_METADATA[k].ticker === clean || clean.startsWith(ASSET_METADATA[k].ticker)) {
+            return ASSET_METADATA[k];
+        }
+    }
+    return null;
+}
+
+function formatAssetLabel(symbol) {
+    if (!symbol) return '';
+    const meta = getAssetMeta(symbol);
+    if (meta) {
+        return `${meta.icon} ${meta.name} (${meta.ticker})`;
+    }
+    return String(symbol);
+}
+
 function logToTerminal(message, type = 'info') {
     if (!terminal) return;
     const time = new Date().toLocaleTimeString();
@@ -172,6 +241,147 @@ function getCurrency(symbol) {
     if (symbol.includes('USDT')) return 'USDT';
     if (symbol.includes('.BA')) return 'ARS';
     return 'USD';
+}
+
+// Resolutor canónico multi-alias para auto-ruteo infalible entre el Monitor y los Tickers del Dashboard
+function resolveSymbol(candAsset) {
+    if (!candAsset) return null;
+    const raw = String(candAsset).trim();
+    const upper = raw.toUpperCase();
+    const clean = upper.replace(/[^A-Z0-9=^.]/g, '');
+
+    const ALIASES = {
+        // Cripto (Normaliza BTCUSD, BTCUSDT, BTC, etc. hacia BTC/USDT)
+        'BTCUSD': 'BTC/USDT',
+        'BTCUSDT': 'BTC/USDT',
+        'BTC': 'BTC/USDT',
+        'BITCOIN': 'BTC/USDT',
+        'ETHUSD': 'ETH/USDT',
+        'ETHUSDT': 'ETH/USDT',
+        'ETH': 'ETH/USDT',
+        'ETHEREUM': 'ETH/USDT',
+        'SOLUSD': 'SOL/USDT',
+        'SOLUSDT': 'SOL/USDT',
+        'SOL': 'SOL/USDT',
+        'SOLANA': 'SOL/USDT',
+
+        // Commodities y Materias Primas
+        'GOLD': 'GC=F',
+        'ORO': 'GC=F',
+        'XAUUSD': 'GC=F',
+        'XAU': 'GC=F',
+        'GC': 'GC=F',
+        'OIL': 'CL=F',
+        'PETROLEO': 'CL=F',
+        'WTI': 'CL=F',
+        'CRUDE': 'CL=F',
+        'CL': 'CL=F',
+        'SILVER': 'SI=F',
+        'PLATA': 'SI=F',
+        'XAGUSD': 'SI=F',
+        'SI': 'SI=F',
+        'GAS': 'NG=F',
+        'NATGAS': 'NG=F',
+        'NG': 'NG=F',
+
+        // Índices y Bonos Soberanos
+        'SP500': 'SPY',
+        'SPX': '^GSPC',
+        'S&P500': 'SPY',
+        'S&P 500': 'SPY',
+        'GSPC': '^GSPC',
+        '^GSPC': '^GSPC',
+        'SPY': 'SPY',
+        'NASDAQ': 'QQQ',
+        'NAS100': 'QQQ',
+        'NDX': 'QQQ',
+        'QQQ': 'QQQ',
+        'TLT': 'TLT',
+        'BONOS': 'TLT',
+
+        // Acciones y Tech
+        'ALIBABA': 'BABA',
+        'BABA': 'BABA',
+        'NVIDIA': 'NVDA',
+        'NVDA': 'NVDA',
+        'APPLE': 'AAPL',
+        'AAPL': 'AAPL',
+        'TESLA': 'TSLA',
+        'TSLA': 'TSLA',
+        'MICROSOFT': 'MSFT',
+        'MSFT': 'MSFT',
+
+        // Mercado Argentino
+        'GGAL': 'GGAL.BA',
+        'GALICIA': 'GGAL.BA',
+        'YPF': 'YPFD.BA',
+        'YPFD': 'YPFD.BA',
+        'PAMP': 'PAMP.BA',
+        'PAMPA': 'PAMP.BA',
+        'BMA': 'BMA.BA',
+        'MACRO': 'BMA.BA',
+        'ALUA': 'ALUA.BA',
+        'ALUAR': 'ALUA.BA',
+        'TXAR': 'TXAR.BA',
+        'TERNIUM': 'TXAR.BA'
+    };
+
+    if (ALIASES[upper]) return ALIASES[upper];
+    if (ALIASES[clean]) return ALIASES[clean];
+
+    // Búsqueda heurística directa en las opciones de symbolSelect
+    const selectEl = document.getElementById('symbolSelect');
+    if (selectEl) {
+        for (const opt of selectEl.options) {
+            const optVal = opt.value;
+            const optUpper = optVal.toUpperCase();
+            const optClean = optVal.replace(/[^A-Z0-9=^.]/g, '').toUpperCase();
+            const optBase = optVal.split('/')[0].toUpperCase();
+
+            if (optVal === raw || optUpper === upper) return optVal;
+            if (optClean === clean) return optVal;
+            if (optBase === clean || optBase === upper) return optVal;
+            if (clean.startsWith(optBase) && (clean.endsWith('USD') || clean.endsWith('USDT'))) return optVal;
+            if (upper.includes(optBase) && optBase.length >= 3) return optVal;
+        }
+    }
+    return null;
+}
+
+// Detección de sesiones bursátiles y horarios de mercado activos
+function isAssetMarketOpen(symbol) {
+    if (!symbol) return true;
+    // Criptomonedas: abiertas 24/7/365
+    if (symbol.includes('/')) return true;
+
+    const now = new Date();
+    const utcDay = now.getUTCDay(); // 0 = Domingo, 6 = Sábado
+    const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+
+    // Fin de semana: Wall Street y Merval completamente inactivos
+    if (utcDay === 0 || utcDay === 6) {
+        // Futuros de materias primas (GC=F, CL=F, etc.) abren domingo a las 22:00 UTC (18:00 EDT)
+        if (symbol.includes('=F') && utcDay === 0 && utcMinutes >= 22 * 60) return true;
+        return false;
+    }
+
+    // Mercado Local Argentino (.BA): 11:00 a 17:00 ARG (14:00 a 20:00 UTC)
+    if (symbol.includes('.BA')) {
+        return (utcMinutes >= 14 * 60 && utcMinutes < 20 * 60);
+    }
+
+    // Wall Street regular (SPY, QQQ, AAPL, TLT, etc.): 13:30 a 20:00 UTC (09:30 a 16:00 EDT)
+    // Con ventana pre/after market ampliada hasta 21:00 UTC
+    if (!symbol.includes('=F')) {
+        return (utcMinutes >= 13 * 60 + 30 && utcMinutes < 20 * 60);
+    }
+
+    // Futuros de materias primas y energía (=F): 24h Lu-Vi con descanso técnico 21:00 - 22:00 UTC
+    if (symbol.includes('=F')) {
+        return !(utcMinutes >= 21 * 60 && utcMinutes < 22 * 60);
+    }
+
+    return true;
 }
 
 // Helpers de Única Fuente de Verdad para la Posición (Bloque 1)
@@ -808,9 +1018,11 @@ function updateCapitalDisplay() {
                 }
             }
 
+            const meta = getAssetMeta(currentPos.symbol);
+            const coinName = meta ? `${meta.icon} ${meta.name}` : currentPos.baseCoin;
             const symbolIndicator = isSameSymbol 
-                ? `<span class="font-bold text-white">${escapeHtml(currentPos.baseCoin)}</span> <span class="text-[10px] text-gray-400">(${escapeHtml(currentPos.symbol)})</span>`
-                : `<span class="font-bold text-white">${escapeHtml(currentPos.baseCoin)}</span> <span class="text-[10px] text-yellow-400 bg-yellow-950/60 px-1.5 py-0.5 rounded border border-yellow-700/50">Segundo plano: ${escapeHtml(currentPos.symbol)}</span>`;
+                ? `<span class="font-bold text-white">${escapeHtml(coinName)}</span> <span class="text-[10px] text-gray-400">(${escapeHtml(currentPos.symbol)})</span>`
+                : `<span class="font-bold text-white">${escapeHtml(coinName)}</span> <span class="text-[10px] text-yellow-400 bg-yellow-950/60 px-1.5 py-0.5 rounded border border-yellow-700/50">Segundo plano: ${escapeHtml(currentPos.symbol)}</span>`;
             document.getElementById('apCoin').innerHTML = symbolIndicator;
             document.getElementById('apAmount').innerText = currentPos.qty.toFixed(6);
             document.getElementById('apEntry').innerText = `$${currentPos.entryPrice.toLocaleString()}`;
@@ -852,8 +1064,10 @@ symbolSelect.addEventListener('change', () => {
         if (currentSymbol.includes('.BA')) {
             feeSelect.value = "0.50";
         } else if (!currentSymbol.includes('/')) {
-            feeSelect.value = "0.25";
+            // Acciones y ETFs EE.UU. / Wall Street (IBKR Tiered / Discount: 0.02% orden, 0.04% round-trip)
+            feeSelect.value = "0.02";
         } else {
+            // Cripto Spot estándar (Binance / Bybit: 0.10% orden, 0.20% round-trip)
             feeSelect.value = "0.10";
         }
         updateBrokerFeeDisplay();
@@ -1015,7 +1229,14 @@ async function fetchMarketData() {
 
 function updateChartHeaderTitles() {
     const titleSym = document.getElementById('chartTitleSymbol');
-    if (titleSym) titleSym.innerText = currentSymbol;
+    if (titleSym) {
+        const meta = getAssetMeta(currentSymbol);
+        if (meta) {
+            titleSym.innerHTML = `<span class="mr-1">${meta.icon}</span><span class="text-white">${escapeHtml(meta.name)}</span> <span class="text-xs text-blue-400 font-mono font-normal">(${escapeHtml(currentSymbol)})</span>`;
+        } else {
+            titleSym.innerText = currentSymbol;
+        }
+    }
     const titleTf = document.getElementById('chartTitleTf');
     if (titleTf) {
         const tfVal = document.getElementById('timeframeSelect')?.value || '1m';
@@ -1050,6 +1271,99 @@ function scheduleNext(delayMs) {
     }
 }
 
+function isSmartMode() {
+    const navVal = document.getElementById('navAgentModeSelect')?.value;
+    const execVal = document.getElementById('executionModeSelect')?.value;
+    return navVal === 'smart' || execVal === 'smart';
+}
+
+function updateAgentButtonState() {
+    if (copilotState === 'awaiting') {
+        agentToggle.innerText = 'Esperando decisión…';
+        agentToggle.disabled = true;
+        agentToggle.className = 'bg-yellow-600 opacity-75 cursor-not-allowed px-4 py-2 rounded font-semibold transition';
+        return;
+    }
+    agentToggle.disabled = false;
+    if (isAgentActive) {
+        agentToggle.innerText = 'Detener Agente (Kill Switch)';
+        agentToggle.className = 'bg-red-600 hover:bg-red-700 px-4 py-2 rounded font-semibold transition';
+    } else {
+        if (isSmartMode()) {
+            agentToggle.innerText = 'Activar Modo Inteligente';
+            agentToggle.className = 'bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded font-semibold transition shadow-[0_0_12px_rgba(168,85,247,0.4)]';
+        } else {
+            agentToggle.innerText = 'Activar Agente';
+            agentToggle.className = 'bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold transition';
+        }
+    }
+}
+
+function updateTransferButtons(isAuto) {
+    const btnManual = document.getElementById('btnTransferManual');
+    const btnAuto = document.getElementById('btnTransferAuto');
+    if (!btnManual || !btnAuto) return;
+    if (isAuto) {
+        btnManual.className = 'px-2 py-0.5 rounded font-bold transition text-gray-400 hover:text-white cursor-pointer';
+        btnAuto.className = 'px-2 py-0.5 rounded font-bold transition bg-purple-600 text-white shadow-[0_0_10px_rgba(168,85,247,0.4)] cursor-pointer';
+    } else {
+        btnManual.className = 'px-2 py-0.5 rounded font-bold transition bg-blue-600 text-white shadow cursor-pointer';
+        btnAuto.className = 'px-2 py-0.5 rounded font-bold transition text-gray-400 hover:text-white cursor-pointer';
+    }
+}
+
+function syncAgentModes(source) {
+    const navEl = document.getElementById('navAgentModeSelect');
+    const execEl = document.getElementById('executionModeSelect');
+    const badgeEl = document.getElementById('smartRoutingBadge');
+    
+    let isSmart = false;
+    if (source === 'nav' && navEl) {
+        isSmart = navEl.value === 'smart';
+        if (execEl) {
+            if (isSmart) {
+                execEl.value = 'smart';
+            } else if (execEl.value === 'smart') {
+                execEl.value = 'auto';
+            }
+        }
+        if (badgeEl) badgeEl.classList.toggle('hidden', !isSmart);
+        logToTerminal(isSmart 
+            ? '🧠 Modo Inteligente ACTIVADO: El bot auto-ruteará hacia las oportunidades recomendadas por el Monitor.' 
+            : '🎯 Modo Fijo ACTIVADO: El bot operará exclusivamente en el activo actual en pantalla.', 'info');
+    } else if (source === 'exec' && execEl) {
+        isSmart = execEl.value === 'smart';
+        if (navEl) navEl.value = isSmart ? 'smart' : 'fixed';
+        if (badgeEl) badgeEl.classList.toggle('hidden', !isSmart);
+        if (isSmart) {
+            logToTerminal('🧠 Modo Inteligente sincronizado desde el panel lateral.', 'info');
+        }
+    } else if (source === 'transfer_btn') {
+        isSmart = (document.getElementById('navAgentModeSelect')?.value === 'smart');
+        if (badgeEl) badgeEl.classList.toggle('hidden', !isSmart);
+    }
+    
+    updateTransferButtons(isSmart);
+    updateAgentButtonState();
+}
+
+document.getElementById('navAgentModeSelect')?.addEventListener('change', () => syncAgentModes('nav'));
+document.getElementById('executionModeSelect')?.addEventListener('change', () => syncAgentModes('exec'));
+
+document.getElementById('btnTransferManual')?.addEventListener('click', () => {
+    const navEl = document.getElementById('navAgentModeSelect');
+    if (navEl) navEl.value = 'fixed';
+    syncAgentModes('nav');
+    logToTerminal('✍️ [RADAR] Pase a Contexto Macro fijado en MANUAL. Tú tienes el control: puedes copiar o pulsar [Aplicar a Macro].', 'info');
+});
+
+document.getElementById('btnTransferAuto')?.addEventListener('click', () => {
+    const navEl = document.getElementById('navAgentModeSelect');
+    if (navEl) navEl.value = 'smart';
+    syncAgentModes('nav');
+    logToTerminal('⚡ [RADAR] Pase a Contexto Macro fijado en AUTOMÁTICO. Las oportunidades recibidas se inyectarán solas.', 'action');
+});
+
 function startAgent(reason = 'user') {
     if (isCircuitBreakerActive()) {
         const state = getRiskState();
@@ -1060,9 +1374,7 @@ function startAgent(reason = 'user') {
     isAgentActive = true;
     copilotState = 'idle';
 
-    agentToggle.innerText = 'Detener Agente (Kill Switch)';
-    agentToggle.disabled = false;
-    agentToggle.className = 'bg-red-600 hover:bg-red-700 px-4 py-2 rounded font-semibold transition';
+    updateAgentButtonState();
 
     // Distinguir sesión si el agente estuvo suspendido
     if (agentWasSuspended && !isCopilotApprovalPause) {
@@ -1077,7 +1389,8 @@ function startAgent(reason = 'user') {
     }
     isCopilotApprovalPause = false;
 
-    logToTerminal(`Agente activado (Motivo: ${reason}). Iniciando análisis cuantitativo.`, 'info');
+    const smartSuffix = isSmartMode() ? ' en Modo Inteligente (Multi-Activo)' : '';
+    logToTerminal(`Agente activado${smartSuffix} (Motivo: ${reason}). Iniciando análisis cuantitativo.`, 'info');
     ejecutarAnalisis();
 }
 
@@ -1091,17 +1404,13 @@ function stopAgent(reason = 'user', { copilotPause = false } = {}) {
         copilotState = 'awaiting';
         isCopilotApprovalPause = true;
         isAgentActive = false;
-        agentToggle.innerText = 'Esperando decisión…';
-        agentToggle.disabled = true;
-        agentToggle.className = 'bg-yellow-600 opacity-75 cursor-not-allowed px-4 py-2 rounded font-semibold transition';
+        updateAgentButtonState();
     } else {
         const wasActive = isAgentActive;
         copilotState = 'idle';
         isCopilotApprovalPause = false;
         isAgentActive = false;
-        agentToggle.innerText = 'Activar Agente';
-        agentToggle.disabled = false;
-        agentToggle.className = 'bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold transition';
+        updateAgentButtonState();
 
         if (copilotExpiryTimer) {
             clearInterval(copilotExpiryTimer);
@@ -1200,6 +1509,38 @@ const ejecutarAnalisis = async () => {
             entryPrice = openPos.entryPrice || 0;
             if (openPos.symbol !== currentSymbol) {
                 logToTerminal(`ℹ️ Posición activa en ${openPos.symbol}. Priorizando análisis para salida en cartera en lugar de ${currentSymbol}.`, 'info');
+            }
+        } else if (isSmartMode() && window.currentInjectedMacro && window.currentInjectedMacro.asset) {
+            const candAsset = String(window.currentInjectedMacro.asset).trim();
+            let matchedSymbol = null;
+            if (symbolSelect) {
+                for (const opt of symbolSelect.options) {
+                    if (opt.value === candAsset || opt.value.split('/')[0] === candAsset || candAsset.includes(opt.value)) {
+                        matchedSymbol = opt.value;
+                        break;
+                    }
+                }
+            }
+            if (matchedSymbol) {
+                const candCur = getCurrency(matchedSymbol);
+                const hasCapital = (portfolio.balances[candCur] >= 5 || portfolio.VAULT >= 5);
+                if (hasCapital) {
+                    if (targetSymbol !== matchedSymbol) {
+                        logToTerminal(`⚡ [MODO INTELIGENTE] Auto-ruteando a ${matchedSymbol} por directiva del Monitor del Mercado.`, 'action');
+                        targetSymbol = matchedSymbol;
+                        currentSymbol = matchedSymbol;
+                        if (symbolSelect) {
+                            symbolSelect.value = matchedSymbol;
+                            symbolSelect.dispatchEvent(new Event('change'));
+                        }
+                        if (window.currentInjectedMacro.text) {
+                            const macroBox = document.getElementById('macroContext');
+                            if (macroBox) macroBox.value = window.currentInjectedMacro.text;
+                        }
+                    }
+                } else {
+                    logToTerminal(`⚠️ [MODO INTELIGENTE] Oportunidad en ${matchedSymbol} pausada: saldo en ${candCur} ($${portfolio.balances[candCur].toFixed(2)}) y Bóveda ($${portfolio.VAULT.toFixed(2)}) menor al mínimo de $5.`, 'warn');
+                }
             }
         }
 
@@ -1321,9 +1662,9 @@ const ejecutarAnalisis = async () => {
                 return;
             }
 
-            if (executionMode === 'auto') {
+            if (executionMode === 'auto' || executionMode === 'smart') {
                 if (signalCandleTs > 0) lastHandledCandle = { symbol: targetSymbol, candleTs: signalCandleTs };
-                executeTrade(data.signal, targetSymbol, baseCoin, execPrice, 'Automático');
+                executeTrade(data.signal, targetSymbol, baseCoin, execPrice, executionMode === 'smart' ? 'Inteligente' : 'Automático');
             } else {
                 stopAgent('copilot_awaiting', { copilotPause: true });
                 showCopilotModal(data.signal, targetSymbol, data.reason, baseCoin, execPrice, signalCandleTs);
@@ -1469,47 +1810,207 @@ if (newsSourceSelect) {
     });
 }
 
+// --- PUENTE CON MONITOR DEL MERCADO Y AGENTE DE INVERSIONES ---
+let lastInjectedTs = null;
+window.currentInjectedMacro = null;
+
+async function checkInjectedMacro() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/macro/current_injected`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.text && data.timestamp && data.timestamp !== lastInjectedTs) {
+            lastInjectedTs = data.timestamp;
+            window.currentInjectedMacro = data;
+            
+            // 1. Bitácora en el terminal
+            const sourceLabel = data.source || 'Monitor del Mercado';
+            logToTerminal(`🌐 [${sourceLabel.toUpperCase()}] Directiva recibida para ${data.asset || 'Activo'} (${data.confidence || 80}% conf).`, 'action');
+            logToTerminal(`🧠 [CEREBRO DEL BOT] Tesis: "${String(data.text || '').substring(0, 90)}..."`, 'info');
+            logToTerminal(`🎯 [PREPARADO] Listo para evaluar con análisis cuantitativo y horario de mercado.`, 'warn');
+            
+            // 2. Si estamos en Modo Inteligente y no hay posición activa, aplicar y auto-rutear automáticamente
+            if (isSmartMode() && !hasOpenPosition()) {
+                const macroInput = document.getElementById('macroContext');
+                if (macroInput) {
+                    macroInput.value = data.text;
+                    macroInput.classList.add('border-purple-500', 'bg-purple-950/30');
+                    setTimeout(() => macroInput.classList.remove('border-purple-500', 'bg-purple-950/30'), 3000);
+                }
+                logToTerminal(`⚡ [MODO INTELIGENTE] Contexto Macro actualizado automáticamente con tesis de ${data.asset}.`, 'action');
+
+                // Auto-ruteo inmediato de activo
+                const cleanSym = String(data.asset || '').trim();
+                let matchedSymbol = null;
+                if (symbolSelect && cleanSym) {
+                    for (const opt of symbolSelect.options) {
+                        if (opt.value === cleanSym || opt.value.split('/')[0] === cleanSym || cleanSym.includes(opt.value)) {
+                            matchedSymbol = opt.value;
+                            break;
+                        }
+                    }
+                }
+                if (matchedSymbol && symbolSelect.value !== matchedSymbol) {
+                    const candCur = getCurrency(matchedSymbol);
+                    const hasCapital = (portfolio.balances[candCur] >= 5 || portfolio.VAULT >= 5);
+                    if (hasCapital) {
+                        symbolSelect.value = matchedSymbol;
+                        symbolSelect.dispatchEvent(new Event('change'));
+                        logToTerminal(`⚡ [MODO INTELIGENTE] Auto-ruteando a ${matchedSymbol} de forma inmediata.`, 'action');
+                    } else {
+                        logToTerminal(`⚠️ [MODO INTELIGENTE] Oportunidad en ${matchedSymbol} pausada: saldo en ${candCur} ($${portfolio.balances[candCur].toFixed(2)}) y Bóveda ($${portfolio.VAULT.toFixed(2)}) menor al mínimo de $5.`, 'warn');
+                    }
+                }
+
+                // Disparo inmediato de análisis cuantitativo con Qwen
+                if (isAgentActive && !cycleInFlight) {
+                    logToTerminal(`⚡ [MODO INTELIGENTE] Disparando análisis cuantitativo inmediato para ${data.asset}...`, 'info');
+                    if (simulateInterval) clearTimeout(simulateInterval);
+                    simulateInterval = setTimeout(ejecutarAnalisis, 600);
+                }
+            }
+            
+            // 3. Refrescar radar para reflejar la tarjeta de inmediato
+            updateMacroRadar();
+        }
+    } catch (_) {}
+}
+setInterval(checkInjectedMacro, 3000); // Polling cada 3 segundos
+
+window.applyMacroContext = function(asset, text) {
+    const macroInput = document.getElementById('macroContext');
+    if (macroInput) {
+        macroInput.value = text || '';
+        macroInput.classList.add('border-green-500', 'bg-green-950/40');
+        setTimeout(() => macroInput.classList.remove('border-green-500', 'bg-green-950/40'), 2500);
+    }
+    
+    const openPos = getOpenPosition();
+    if (asset && !openPos) {
+        const cleanSym = String(asset).trim();
+        let matchedSymbol = null;
+        if (symbolSelect) {
+            for (const opt of symbolSelect.options) {
+                if (opt.value === cleanSym || opt.value.split('/')[0] === cleanSym || cleanSym.includes(opt.value)) {
+                    matchedSymbol = opt.value;
+                    break;
+                }
+            }
+        }
+        if (matchedSymbol && symbolSelect.value !== matchedSymbol) {
+            symbolSelect.value = matchedSymbol;
+            symbolSelect.dispatchEvent(new Event('change'));
+            logToTerminal(`📥 [CONTEXTO MACRO] Tesis aplicada y gráfico cambiado a ${matchedSymbol}.`, 'action');
+        } else {
+            logToTerminal(`📥 [CONTEXTO MACRO] Tesis aplicada al Cuadro de Contexto Macro.`, 'action');
+        }
+    } else if (openPos) {
+        logToTerminal(`📥 [CONTEXTO MACRO] Tesis aplicada. (El gráfico se mantiene en ${openPos.symbol} por posición abierta).`, 'info');
+    }
+};
+
+window.copyMacroText = function(text, btnElement) {
+    const cleanText = text || '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cleanText).then(() => {
+            if (btnElement) {
+                const prev = btnElement.innerText;
+                btnElement.innerText = '✅ Copiado';
+                setTimeout(() => { btnElement.innerText = prev; }, 1500);
+            }
+            logToTerminal(`📋 Tesis copiada al portapapeles.`, 'info');
+        }).catch(() => {
+            fallbackCopy(cleanText, btnElement);
+        });
+    } else {
+        fallbackCopy(cleanText, btnElement);
+    }
+};
+
+function fallbackCopy(text, btnElement) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand('copy');
+        if (btnElement) {
+            const prev = btnElement.innerText;
+            btnElement.innerText = '✅ Copiado';
+            setTimeout(() => { btnElement.innerText = prev; }, 1500);
+        }
+        logToTerminal(`📋 Tesis copiada al portapapeles.`, 'info');
+    } catch (_) {}
+    document.body.removeChild(ta);
+}
+
 // --- Agente de Inversiones (Radar Macro) ---
 async function updateMacroRadar() {
     const lobby = document.getElementById("lobbyView");
     if (lobby && !lobby.classList.contains("hidden")) return;
 
     const toggle = document.getElementById('investmentToggle');
+    const squadToggle = document.getElementById('investmentSquadToggle');
     const container = document.getElementById('macroOpportunitiesContainer');
-    if (!toggle || !container) return;
+    if (!container) return;
 
-    if (!toggle.checked) {
+    const isEnabled = (toggle && toggle.checked) || (squadToggle && squadToggle.checked);
+    if (!isEnabled) {
         container.innerHTML = '<p class="text-xs text-gray-500 text-center py-2">Agente Desactivado.</p>';
         return;
     }
 
     const engine = document.getElementById('engineSelect')?.value || 'ollama';
-    container.innerHTML = '<p class="text-xs text-yellow-500 text-center py-2 animate-pulse">Escaneando eventos globales...</p>';
+    const source = document.getElementById('investmentSourceSelect')?.value || 'hybrid';
+    container.innerHTML = `<p class="text-xs text-yellow-500 text-center py-2 animate-pulse">Consultando radar de oportunidades (${source})...</p>`;
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/macro/radar?engine=${engine}`);
+        const response = await fetch(`${API_BASE_URL}/api/macro/radar?engine=${engine}&source=${source}`);
         const data = await response.json();
         
         container.innerHTML = '';
         if (Array.isArray(data) && data.length > 0) {
-            data.forEach(item => {
+            data.forEach((item, index) => {
                 const isOp = item.type === 'Oportunidad';
                 const colorClass = isOp ? 'text-green-400 bg-green-400/10' : 'text-red-400 bg-red-400/10';
                 const typeColor = isOp ? 'text-green-400' : 'text-red-400';
+                const itemSource = item.source || (item.injected ? 'monitor' : 'native');
+                const sourceBadge = (itemSource === 'monitor')
+                    ? '<span class="text-[9px] bg-cyan-900/60 text-cyan-300 border border-cyan-600/50 px-1.5 py-0.5 rounded font-mono">🖥️ Monitor</span>'
+                    : '<span class="text-[9px] bg-yellow-900/60 text-yellow-300 border border-yellow-600/50 px-1.5 py-0.5 rounded font-mono">🌐 Nativo</span>';
+                
+                const safeAsset = escapeHtml(item.asset || 'N/A');
+                const safeReason = escapeHtml(item.reason || '');
+                const rawReason = (item.reason || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const rawAsset = (item.asset || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                
                 const div = document.createElement('div');
-                div.className = 'bg-gray-800 p-2 rounded border border-gray-600 mb-2';
+                div.className = 'bg-gray-800 p-2.5 rounded border border-gray-600 mb-2 shadow-sm';
                 div.innerHTML = `
                     <div class="flex justify-between items-center mb-1">
-                        <span class="text-xs font-bold text-white">${escapeHtml(item.asset || 'N/A')}</span>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-xs font-bold text-white">${safeAsset}</span>
+                            ${sourceBadge}
+                        </div>
                         <span class="text-[10px] ${colorClass} font-bold px-1 rounded">${Number(item.confidence) || 0}% Conf.</span>
                     </div>
-                    <p class="text-[10px] text-gray-400 leading-tight"><span class="font-bold ${typeColor}">${escapeHtml(item.type)}:</span> ${escapeHtml(item.reason)}</p>
-                    <p class="text-[9px] text-gray-500 mt-1">⏳ Sugerido: ${escapeHtml(item.schedule || '-')}</p>
+                    <p class="text-[10px] text-gray-300 leading-tight mb-2"><span class="font-bold ${typeColor}">${escapeHtml(item.type || 'Análisis')}:</span> ${safeReason}</p>
+                    <div class="flex items-center justify-between pt-1 border-t border-gray-700/60 text-[10px]">
+                        <span class="text-gray-500 text-[9px]">⏳ ${escapeHtml(item.schedule || 'Inmediato')}</span>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="window.applyMacroContext('${rawAsset}', '${rawReason}')" class="bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded text-[10px] font-semibold transition flex items-center gap-1 shadow cursor-pointer" title="Cargar tesis en Contexto Macro">
+                                <span>📥</span> Aplicar a Macro
+                            </button>
+                            <button onclick="window.copyMacroText('${rawReason}', this)" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-1.5 py-0.5 rounded text-[10px] transition cursor-pointer" title="Copiar tesis">
+                                📋 Copiar
+                            </button>
+                        </div>
+                    </div>
                 `;
                 container.appendChild(div);
             });
         } else {
-            container.innerHTML = '<p class="text-xs text-gray-500 text-center py-2">Sin hallazgos macro.</p>';
+            container.innerHTML = `<p class="text-xs text-gray-500 text-center py-2">Sin hallazgos en radar (${source}).</p>`;
         }
     } catch (err) {
         console.error("Fallo el Agente de Inversiones", err);
@@ -1519,28 +2020,42 @@ async function updateMacroRadar() {
 updateMacroRadar();
 setInterval(updateMacroRadar, 120000); // 2 minutos
 
-const investmentToggle = document.getElementById('investmentToggle');
-if (investmentToggle) {
-    investmentToggle.addEventListener('change', () => {
-        const isChecked = investmentToggle.checked;
-        logToTerminal(isChecked ? "Agente de Inversiones ACTIVADO" : "Agente de Inversiones DESACTIVADO", "info");
-        
-        const badge = document.getElementById('radarLiveStatus');
-        if (badge) {
-            if (isChecked) {
-                badge.innerText = "EN VIVO";
-                badge.className = "text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/50 transition-colors";
-            } else {
-                badge.innerText = "OFF";
-                badge.className = "text-[10px] bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded border border-gray-500/50 transition-colors";
-            }
+// Sincronización bidireccional de Agente de Inversiones
+function setInvestmentAgentState(isChecked) {
+    const invToggle = document.getElementById('investmentToggle');
+    const squadToggle = document.getElementById('investmentSquadToggle');
+    if (invToggle && invToggle.checked !== isChecked) invToggle.checked = isChecked;
+    if (squadToggle && squadToggle.checked !== isChecked) squadToggle.checked = isChecked;
+
+    const badge = document.getElementById('radarLiveStatus');
+    if (badge) {
+        if (isChecked) {
+            badge.innerText = "EN VIVO";
+            badge.className = "text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/50 transition-colors";
+        } else {
+            badge.innerText = "OFF";
+            badge.className = "text-[10px] bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded border border-gray-500/50 transition-colors";
         }
-        
-        updateMacroRadar();
-    });
+    }
+    logToTerminal(isChecked ? "🔭 Agente de Inversiones ACTIVADO" : "Agente de Inversiones DESACTIVADO", "info");
+    updateMacroRadar();
 }
 
-document.getElementById('clearLogs').addEventListener('click', () => {
+document.getElementById('investmentToggle')?.addEventListener('change', (e) => {
+    setInvestmentAgentState(e.target.checked);
+});
+
+document.getElementById('investmentSquadToggle')?.addEventListener('change', (e) => {
+    setInvestmentAgentState(e.target.checked);
+});
+
+document.getElementById('investmentSourceSelect')?.addEventListener('change', () => {
+    const src = document.getElementById('investmentSourceSelect')?.value || 'hybrid';
+    logToTerminal(`Fuente de Agente de Inversiones cambiada a: ${src}`, 'info');
+    updateMacroRadar();
+});
+
+document.getElementById('clearLogs')?.addEventListener('click', () => {
     terminal.innerHTML = '';
 });
 
@@ -1858,6 +2373,22 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
             }
 
             const riskFactor = parseFloat(document.getElementById('riskSelect')?.value || "0.25");
+            
+            // JIT Funding (Cuentas Ómnibus / Bóveda central): Si la billetera operativa tiene saldo insuficiente pero hay fondos en la Bóveda
+            let isJitAllocated = false;
+            if (portfolio.balances[currency] < 5 && portfolio.VAULT >= 5) {
+                const vaultAlloc = Math.max(5.0, portfolio.VAULT * riskFactor);
+                const safeAlloc = Math.min(portfolio.VAULT, vaultAlloc);
+                if (safeAlloc >= 5.0) {
+                    portfolio.VAULT -= safeAlloc;
+                    const destAmount = (currency === 'ARS') ? (safeAlloc * 1000.0) : safeAlloc;
+                    portfolio.balances[currency] += destAmount;
+                    portfolio.deposits[currency] = (portfolio.deposits[currency] || 0) + destAmount;
+                    isJitAllocated = true;
+                    logToTerminal(`🏦 [JIT FUNDING] Asignados $${safeAlloc.toFixed(2)} USD desde la Bóveda a ${currency} para ejecutar la oportunidad.`, 'action');
+                }
+            }
+
             const maxRiesgo = portfolio.balances[currency] * riskFactor;
             const tradeAmount = maxRiesgo;
             
@@ -1890,7 +2421,8 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
                 beArmed: false,
                 trailActive: false,
                 trailPct: 0.5,
-                openedAt: new Date().toISOString()
+                openedAt: new Date().toISOString(),
+                jitAllocated: isJitAllocated
             };
             
             // Espejo retrocompatible
@@ -1943,6 +2475,17 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
             const pnlNeto = dolaresNetos - costBasis;
             
             portfolio.balances[sellCurrency] += dolaresNetos;
+            if (pos && pos.jitAllocated) {
+                // Sweep-Back: Retornar capital base + resultado neto directamente a la Bóveda del Broker
+                const sweepAmount = dolaresNetos;
+                portfolio.balances[sellCurrency] = Math.max(0, portfolio.balances[sellCurrency] - sweepAmount);
+                if (sellCurrency === 'ARS') {
+                    portfolio.VAULT += (sweepAmount / 1000.00);
+                } else {
+                    portfolio.VAULT += sweepAmount;
+                }
+                logToTerminal(`🧹 [SWEEP-BACK] Trade JIT cerrado. $${sweepAmount.toFixed(2)} ${sellCurrency} devueltos íntegramente a la Bóveda (Saldo Bóveda: $${portfolio.VAULT.toFixed(2)} USD).`, 'action');
+            }
             portfolio.position = null;
             portfolio.ASSET = 0;
             portfolio.entryPrice = 0;
@@ -2607,7 +3150,7 @@ function generarResumen() {
     
     if (tradesCerrados.length === 0) {
         if (openPos) {
-            tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-4 text-center text-yellow-400 font-medium bg-yellow-900/10">⏳ Posición activa en curso (${openPos.qty.toFixed(6)} ${escapeHtml(openPos.baseCoin)} comprados a $${openPos.entryPrice.toLocaleString()}). Las estadísticas de acierto (Win Rate) y curva se completarán al cerrar la venta.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-4 text-center text-yellow-400 font-medium bg-yellow-900/10">⏳ Posición activa en curso (${openPos.qty.toFixed(6)} ${escapeHtml(formatAssetLabel(openPos.symbol || openPos.baseCoin))} comprados a $${openPos.entryPrice.toLocaleString()}). Las estadísticas de acierto (Win Rate) y curva se completarán al cerrar la venta.</td></tr>`;
         } else {
             tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-4 text-center text-gray-600 italic">No hay operaciones de ciclo completo (Compra y Venta) en este periodo.</td></tr>`;
         }
@@ -2618,7 +3161,7 @@ function generarResumen() {
             const signTr = t.pnl > 0 ? '+' : '';
             tr.innerHTML = `
                 <td class="px-4 py-2">${new Date(t.timestampVenta).toLocaleString()}</td>
-                <td class="px-4 py-2 font-bold">${escapeHtml(t.activo)}</td>
+                <td class="px-4 py-2 font-bold text-white">${escapeHtml(formatAssetLabel(t.activo))}</td>
                 <td class="px-4 py-2 text-gray-300">$${t.compra.toFixed(2)}</td>
                 <td class="px-4 py-2 text-gray-300">$${t.venta.toFixed(2)}</td>
                 <td class="px-4 py-2 font-mono text-yellow-400">$${t.feeTotal.toFixed(2)}</td>
@@ -2829,7 +3372,8 @@ if (btnPremarket) {
             // Si hay activos analizados, los listamos en el terminal (Bloque 7)
             if (data.activos && data.activos.length > 0) {
                 data.activos.forEach(a => {
-                    const msg = `Consenso [${a.simbolo || 'N/A'}]: ${a.consenso_direccional || 'NEUTRAL'}. Razón: ${a.razonamiento || '-'}. Autorizado: ${a.autorizar_operacion || false}`;
+                    const assetTxt = formatAssetLabel(a.simbolo || 'N/A');
+                    const msg = `Consenso [${assetTxt}]: ${a.consenso_direccional || 'NEUTRAL'}. Razón: ${a.razonamiento || '-'}. Autorizado: ${a.autorizar_operacion || false}`;
                     const logType = a.consenso_direccional === "ALCISTA" ? "action" : (a.consenso_direccional === "BAJISTA" || a.consenso_direccional === "PELIGRO" ? "error" : "warn");
                     logToTerminal(msg, logType);
                 });
@@ -2933,16 +3477,18 @@ document.addEventListener("DOMContentLoaded", () => {
                     let html = `<p class="font-bold text-white text-base mb-2">Resumen General:</p>
                                 <p class="mb-4 text-green-300">${escapeHtml(data.resumen_general)}</p>
                                 <p class="font-bold text-white text-base mb-2">Análisis por Activo:</p><ul class="space-y-2">`;
-                    if (data.activos) {
                         data.activos.forEach(a => {
                             const dir = escapeHtml(a.consenso_direccional);
-                            const color = a.consenso_direccional === "ALCISTA" ? "text-green-400" : (a.consenso_direccional === "BAJISTA" || a.consenso_direccional === "PELIGRO" ? "text-red-400" : "text-yellow-400");
-                            html += `<li class="bg-gray-800 p-2 rounded border border-gray-700">
-                                <span class="font-bold text-white">${escapeHtml(a.simbolo)}</span> - <span class="${color} font-bold">${dir}</span><br>
-                                <span class="text-gray-400 text-xs">${escapeHtml((a.razonamiento || '').slice(0, 300))}</span>
+                            const color = a.consenso_direccional === "ALCISTA" ? "text-green-400 border-green-700/50 bg-green-950/40" : (a.consenso_direccional === "BAJISTA" || a.consenso_direccional === "PELIGRO" ? "text-red-400 border-red-700/50 bg-red-950/40" : "text-yellow-400 border-yellow-700/50 bg-yellow-950/40");
+                            const assetFormatted = formatAssetLabel(a.simbolo);
+                            html += `<li class="bg-gray-800 p-3 rounded-lg border border-gray-700 shadow-sm">
+                                <div class="flex items-center justify-between mb-1.5">
+                                    <span class="font-bold text-white text-sm flex items-center gap-1.5">${escapeHtml(assetFormatted)}</span>
+                                    <span class="${color} font-bold text-xs uppercase px-2 py-0.5 rounded border">${dir}</span>
+                                </div>
+                                <span class="text-gray-300 text-xs block leading-relaxed">${escapeHtml((a.razonamiento || '').slice(0, 300))}</span>
                             </li>`;
                         });
-                    }
                     html += `</ul>`;
                     lobbyReportBox.innerHTML = html;
                 }
@@ -3008,6 +3554,13 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 });
+
+// Prevenir cambio accidental de selectores (ej. Motor IA) al hacer scroll con la rueda del ratón
+document.addEventListener('wheel', (e) => {
+    if (document.activeElement && document.activeElement.tagName === 'SELECT') {
+        document.activeElement.blur();
+    }
+}, { passive: true });
 
 // ==============================================================================
 // // TODO(FASE5):

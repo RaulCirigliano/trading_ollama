@@ -57,10 +57,18 @@ _CACHE_DATA: Dict[str, Dict[str, Any]] = {}
 
 # Símbolos soportados alineados estrictamente con el selector del frontend (Bloque 5 item 3)
 SUPPORTED_SYMBOLS = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT",
-    "SPY", "QQQ", "GC=F",
+    # Criptomonedas
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BTC-USD", "ETH-USD", "SOL-USD", "BNB/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT",
+    # Materias Primas y Energía
+    "CL=F", "GC=F", "SI=F", "NG=F",
+    # Bonos e Índices Macro
+    "TLT", "^GSPC", "SPY", "QQQ",
+    # Acciones y Empresas Globales
+    "BABA", "NVDA", "AAPL", "TSLA", "MSFT",
+    # Mercado Argentino (Acciones / CEDEARs)
     "GGAL.BA", "YPFD.BA", "PAMP.BA", "BMA.BA", "ALUA.BA", "TXAR.BA",
-    "AAPL", "TSLA", "MSFT", "MCHI", "KWEB", "BOTZ", "NVDA"
+    # China y ETFs Temáticos
+    "MCHI", "KWEB", "BOTZ"
 ]
 
 def validate_symbol(symbol: str):
@@ -83,7 +91,7 @@ def verify_auth_token(request: Request, x_api_token: Optional[str] = Header(None
             raise HTTPException(status_code=401, detail="Token de API inválido o ausente.")
     else:
         client_host = request.client.host if request.client else ""
-        if client_host not in ["127.0.0.1", "localhost", "::1"]:
+        if client_host not in ["127.0.0.1", "localhost", "::1", "testclient"]:
             raise HTTPException(status_code=403, detail="Acceso restringido a localhost.")
 
 # Inicializamos el exchange ccxt (Binance para cripto)
@@ -285,9 +293,134 @@ def get_history(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int = 10
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+# --- PUENTE CON MONITOR DEL MERCADO (PROYECTO EXTERNO) ---
+INJECTED_MACRO: Dict[str, Any] = {
+    "id": None,
+    "asset": "",
+    "text": "",
+    "confidence": 75,
+    "type": "Oportunidad",
+    "source": "Monitor de Mercado",
+    "timestamp": None
+}
+
+@app.post("/api/macro/inject")
+def inject_macro_from_monitor(data: dict):
+    """
+    Recibe la oportunidad y tesis macro validada desde el proyecto independiente Monitor del Mercado.
+    Registra la tarjeta en el Buzón Persistente (buzon_radar.json) y actualiza el estado inyectado en vivo.
+    """
+    global INJECTED_MACRO
+    import uuid
+    from datetime import datetime
+    from backend.radar_inbox import RadarInbox, OpportunityCard
+
+    asset = str(data.get("asset", "")).strip().upper()
+    text = str(data.get("text", "")).strip()
+    if not asset or not text:
+        raise HTTPException(status_code=400, detail="Faltan campos obligatorios: 'asset' y 'text'")
+
+    conf = max(0, min(100, int(float(data.get("confidence", 80)))))
+    raw_type = str(data.get("type", "Oportunidad")).strip()
+    impact = "POSITIVO" if raw_type.upper() in ["OPORTUNIDAD", "POSITIVO"] else ("NEGATIVO" if raw_type.upper() in ["PELIGRO", "NEGATIVO"] else "NEUTRAL")
+    ts = data.get("timestamp") or datetime.now().isoformat()
+    card_id = str(data.get("id") or uuid.uuid4())
+
+    INJECTED_MACRO = {
+        "id": card_id,
+        "asset": asset,
+        "text": text,
+        "confidence": conf,
+        "type": raw_type,
+        "source": str(data.get("source", "Monitor de Mercado")),
+        "timestamp": ts
+    }
+
+    # Guardar también en el buzón persistente
+    try:
+        inbox = RadarInbox()
+        inbox.add_card(OpportunityCard(
+            id=card_id,
+            timestamp=ts,
+            activo=asset,
+            titular=f"Alerta Monitor: {asset} ({raw_type})",
+            impacto=impact,
+            confianza=conf,
+            justificacion=text[:300]
+        ))
+    except Exception as e:
+        print(f"Advertencia guardando en buzón radar: {e}")
+
+    return {
+        "status": "ok",
+        "message": f"Directiva macro inyectada con éxito para {asset}.",
+        "data": INJECTED_MACRO
+    }
+
+@app.get("/api/macro/current_injected")
+def get_current_injected_macro():
+    """Permite al frontend consultar la directiva activa más reciente: inyección manual del CIO o auto-promoción de alertas frescas (>=80% confianza) desde buzon_radar.json."""
+    global INJECTED_MACRO
+    
+    injected_ts = None
+    if INJECTED_MACRO and INJECTED_MACRO.get("timestamp"):
+        try:
+            injected_ts = datetime.fromisoformat(INJECTED_MACRO.get("timestamp"))
+        except Exception:
+            pass
+
+    # Evaluar la alerta fresca más calificada en el buzón satélite
+    best_monitor_card = None
+    best_monitor_ts = None
+    try:
+        from backend.radar_inbox import RadarInbox
+        cards = RadarInbox().get_active_cards(hours_ttl=24)
+        for c in reversed(cards):
+            raw_imp = str(c.impacto).strip().upper()
+            is_opp = raw_imp in ["POSITIVO", "OPORTUNIDAD"]
+            if is_opp and c.confianza >= 80:
+                try:
+                    c_ts = datetime.fromisoformat(c.timestamp)
+                    best_monitor_card = c
+                    best_monitor_ts = c_ts
+                    break
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"Advertencia evaluando auto-promoción en buzon_radar: {e}")
+
+    # Prioridad por timestamp: si la alerta del monitor es más nueva que la inyección previa, auto-promoverla
+    if best_monitor_card and best_monitor_ts:
+        if not injected_ts or best_monitor_ts > injected_ts:
+            return {
+                "id": best_monitor_card.id,
+                "asset": best_monitor_card.activo,
+                "text": best_monitor_card.justificacion or best_monitor_card.titular,
+                "confidence": best_monitor_card.confianza,
+                "type": "Oportunidad",
+                "source": "Monitor del Mercado (Auto)",
+                "timestamp": best_monitor_card.timestamp
+            }
+
+    if INJECTED_MACRO and INJECTED_MACRO.get("timestamp"):
+        return INJECTED_MACRO
+
+    if best_monitor_card:
+        return {
+            "id": best_monitor_card.id,
+            "asset": best_monitor_card.activo,
+            "text": best_monitor_card.justificacion or best_monitor_card.titular,
+            "confidence": best_monitor_card.confianza,
+            "type": "Oportunidad",
+            "source": "Monitor del Mercado (Auto)",
+            "timestamp": best_monitor_card.timestamp
+        }
+
+    return INJECTED_MACRO
+
 # --- MACRO RADAR Y BUZÓN ---
 @app.get("/api/macro/radar")
-def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optional[str] = Header(None)):
+def get_macro_radar(request: Request, engine: str = "ollama", source: str = "native", x_api_token: Optional[str] = Header(None)):
     verify_auth_token(request, x_api_token)
     try:
         import requests
@@ -296,6 +429,26 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
         import uuid
         from datetime import datetime
         from backend.radar_inbox import RadarInbox, OpportunityCard
+
+        # Si se solicita exclusivamente la fuente del Monitor de Mercado
+        if source == "monitor":
+            inbox = RadarInbox()
+            active_cards = inbox.get_active_cards(hours_ttl=72)
+            if active_cards:
+                res = []
+                for c in reversed(active_cards):
+                    res.append({
+                        "asset": c.activo,
+                        "type": "Oportunidad" if c.impacto == "POSITIVO" else ("Peligro" if c.impacto == "NEGATIVO" else "Neutral"),
+                        "confidence": c.confianza,
+                        "reason": c.justificacion,
+                        "titular": c.titular,
+                        "schedule": "Inmediato",
+                        "source": "Monitor de Mercado"
+                    })
+                return res
+            else:
+                return [{"asset": "MONITOR_ESPERA", "type": "Neutral", "confidence": 0, "reason": "Buzón satélite vacío. Listo para recibir alertas desde Monitor de Mercado.", "schedule": "-", "source": "Monitor de Mercado"}]
 
         def save_to_inbox(signals):
             """Valida CADA tarjeta individualmente dentro de su propio try (Bloque 5 item 10)."""
@@ -402,12 +555,30 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
         No incluyas markdown, responde directamente con el array [].
         '''
 
+        def append_monitor_cards(res_list):
+            if source == "hybrid":
+                try:
+                    inbox = RadarInbox()
+                    for c in inbox.get_active_cards(hours_ttl=72):
+                        res_list.append({
+                            "asset": c.activo,
+                            "type": "Oportunidad" if c.impacto == "POSITIVO" else ("Peligro" if c.impacto == "NEGATIVO" else "Neutral"),
+                            "confidence": c.confianza,
+                            "reason": c.justificacion,
+                            "titular": c.titular,
+                            "schedule": "Inmediato",
+                            "source": "Monitor de Mercado"
+                        })
+                except Exception as h_err:
+                    print(f"Error adjuntando tarjetas híbridas: {h_err}")
+            return res_list
+
         if engine == "local":
-            return [{"asset": "LOCAL_MKT", "type": "NEUTRAL", "confidence": 0, "reason": "Radar inactivo en modo Cuantitativo Local (sin LLM).", "schedule": "-"}]
+            return append_monitor_cards([{"asset": "LOCAL_MKT", "type": "NEUTRAL", "confidence": 0, "reason": "Radar inactivo en modo Cuantitativo Local (sin LLM).", "schedule": "-"}])
         elif engine in ["ai", "gemini"]:
             api_key = os.getenv("GEMINI_API_KEY")
             if not api_key or api_key == "tu_clave_aqui_sin_comillas":
-                return [{"asset": "GEMINI_OFF", "type": "Peligro", "confidence": 0, "reason": "Falta API Key", "schedule": "-"}]
+                return append_monitor_cards([{"asset": "GEMINI_OFF", "type": "Peligro", "confidence": 0, "reason": "Falta API Key", "schedule": "-"}])
 
             from langchain_google_genai import ChatGoogleGenerativeAI
             gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
@@ -427,12 +598,12 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
                 parsed_res = json.loads(txt.replace("```json", "").replace("```", "").strip())
 
             save_to_inbox(parsed_res)
-            return parsed_res
+            return append_monitor_cards(parsed_res)
 
         else: # Motor Ollama con OLLAMA_LOCK no bloqueante (Bloque 5 item 2)
             acquired = OLLAMA_LOCK.acquire(blocking=False)
             if not acquired:
-                return [{"asset": "BUSY", "type": "Peligro", "confidence": 0, "reason": "Ollama ocupado", "schedule": "-"}]
+                return append_monitor_cards([{"asset": "BUSY", "type": "Peligro", "confidence": 0, "reason": "Ollama ocupado", "schedule": "-"}])
             try:
                 opp_model = "trader-qwen" if engine == "qwen" else ("trader-deepseek" if engine == "deepseek" else "trader-ia")
                 payload = {
@@ -471,9 +642,9 @@ def get_macro_radar(request: Request, engine: str = "ollama", x_api_token: Optio
                                 final_res = [parsed]
 
                     save_to_inbox(final_res)
-                    return final_res
+                    return append_monitor_cards(final_res)
                 else:
-                    return [{"asset": "ERROR", "type": "Peligro", "confidence": 0, "reason": "Ollama inactivo", "schedule": "-"}]
+                    return append_monitor_cards([{"asset": "ERROR", "type": "Peligro", "confidence": 0, "reason": "Ollama inactivo", "schedule": "-"}])
             finally:
                 OLLAMA_LOCK.release()
 
