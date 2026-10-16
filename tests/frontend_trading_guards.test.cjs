@@ -50,6 +50,8 @@ test('directive symbol resolution uses exact unambiguous matches only', () => {
     assert.equal(matchDirectiveSymbol('BTCUSD', ['BTC/USDT', 'BTC-USD']), 'BTC-USD');
     assert.equal(matchDirectiveSymbol('BTC', ['BTC/USDT', 'BTC-USD']), null);
     assert.equal(matchDirectiveSymbol('BTCUSDT', ['BTC/USDT', 'ETH/USDT']), 'BTC/USDT');
+    assert.equal(matchDirectiveSymbol('BTC-USD', ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']), 'BTC/USDT');
+    assert.equal(matchDirectiveSymbol('ETH-USD', ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']), 'ETH/USDT');
     assert.equal(matchDirectiveSymbol('NOTBTC', ['BTC/USDT']), null);
 });
 

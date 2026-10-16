@@ -8,6 +8,118 @@ function apiAuthHeaders(headers = {}) {
     return token ? { ...headers, 'X-API-Token': token } : headers;
 }
 
+function parseBrainSelection(value) {
+    if (typeof value === 'string' && value.startsWith('ollama|')) {
+        return { engine: 'ollama', model: value.slice('ollama|'.length) };
+    }
+    return { engine: value === 'ai' ? 'gemini' : value, model: null };
+}
+
+function brainSelectionValue(brain) {
+    if (brain?.engine === 'ollama' && brain.model) return `ollama|${brain.model}`;
+    return brain?.engine === 'gemini' ? 'ai' : brain?.engine;
+}
+
+function setBrainSelectorsValue(value) {
+    for (const id of ['engineSelect', 'lobbyEngineSelect']) {
+        const select = document.getElementById(id);
+        if (select && Array.from(select.options).some(option => option.value === value)) {
+            select.value = value;
+        }
+    }
+}
+
+async function refreshBrainModelOptions() {
+    const response = await fetch(`${API_BASE_URL}/api/system/models`, { headers: apiAuthHeaders() });
+    if (!response.ok) throw new Error(`HTTP ${response.status} consultando modelos Ollama.`);
+    const data = await response.json();
+    const brainResponse = await fetch(`${API_BASE_URL}/api/system/brain`, { headers: apiAuthHeaders() });
+    if (!brainResponse.ok) throw new Error(`HTTP ${brainResponse.status} consultando el cerebro central.`);
+    const brain = await brainResponse.json();
+    const models = Array.isArray(data.models) ? data.models : [];
+    if (brain.engine === 'ollama' && brain.model && !models.includes(brain.model)) {
+        models.push(brain.model);
+    }
+    const availableModels = [...new Set(models)].sort((a, b) => a.localeCompare(b));
+
+    for (const id of ['engineSelect', 'lobbyEngineSelect']) {
+        const select = document.getElementById(id);
+        if (!select) continue;
+        const previousValue = select.value;
+        select.replaceChildren();
+        const localOption = new Option('⚙️ Modelo Matemático Local', 'local');
+        const geminiOption = new Option('☁️ Google Gemini (Nube)', 'ai');
+        const cioOption = new Option('🏛️ Antigravity CIO (asesor macro; no ejecuta señales)', 'antigravity_cio');
+        cioOption.disabled = true;
+        select.add(localOption);
+        for (const modelName of availableModels) {
+            select.add(new Option(`🤖 Ollama · ${modelName}`, `ollama|${modelName}`));
+        }
+        select.add(geminiOption);
+        select.add(cioOption);
+        if (!availableModels.length) {
+            const unavailable = new Option('Ollama no disponible / sin modelos', 'ollama|');
+            unavailable.disabled = true;
+            select.add(unavailable);
+        }
+        const centralValue = brainSelectionValue(brain);
+        const desiredValue = Array.from(select.options).some(option => option.value === centralValue)
+            ? centralValue
+            : (Array.from(select.options).some(option => option.value === previousValue) ? previousValue : 'local');
+        select.value = desiredValue;
+    }
+
+    if (!brain.model && availableModels.length && brain.engine === 'ollama') {
+        await saveBrainSelection(`ollama|${availableModels[0]}`);
+    }
+    if (!data.available) {
+        logToTerminal?.(data.error || 'Ollama no está disponible; se conserva la lista de modelos en caché.', 'warn');
+    }
+}
+
+async function saveBrainSelection(value) {
+    const selected = parseBrainSelection(value);
+    if (selected.engine === 'ollama' && !selected.model) return;
+    const payload = {
+        engine: selected.engine === 'ai' ? 'gemini' : selected.engine,
+        model: selected.model
+    };
+    const response = await fetch(`${API_BASE_URL}/api/system/brain`, {
+        method: 'POST',
+        headers: apiAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || `HTTP ${response.status} guardando el cerebro central.`);
+    }
+    setBrainSelectorsValue(value);
+}
+
+function startBrainSelectorSync() {
+    refreshBrainModelOptions().catch(error => {
+        logToTerminal?.(`No se pudo sincronizar la selección de cerebros: ${error.message}`, 'error');
+    });
+    for (const id of ['engineSelect', 'lobbyEngineSelect']) {
+        document.getElementById(id)?.addEventListener('change', event => {
+            const value = event.target.value;
+            setBrainSelectorsValue(value);
+            saveBrainSelection(value).catch(error => {
+                logToTerminal?.(`No se pudo guardar la selección central del cerebro: ${error.message}`, 'error');
+            });
+        });
+    }
+    setInterval(async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/system/brain`, { headers: apiAuthHeaders() });
+            if (!response.ok) throw new Error(`HTTP ${response.status} consultando el cerebro central.`);
+            setBrainSelectorsValue(brainSelectionValue(await response.json()));
+        } catch (error) {
+            console.warn('No se pudo actualizar la selección central del cerebro:', error.message);
+        }
+    }, 8000);
+}
+
 // Elementos de UI
 const terminal = document.getElementById('terminal');
 const agentToggle = document.getElementById('agentToggle');
@@ -1623,8 +1735,18 @@ const ejecutarAnalisis = async () => {
     let timeoutId = null;
     let controller = null;
 
-    const engine = document.getElementById('engineSelect')?.value || 'local';
+    const brain = parseBrainSelection(document.getElementById('engineSelect')?.value || 'local');
+    const engine = brain.engine === 'gemini' ? 'ai' : brain.engine;
+    if (['local', 'antigravity_cio'].includes(engine)) {
+        container.innerHTML = engine === 'antigravity_cio'
+            ? '<p class="text-xs text-purple-300 text-center py-2">Antigravity CIO prepara análisis macro desde el Monitor; no responde al radar de la Trinchera.</p>'
+            : '<p class="text-xs text-gray-400 text-center py-2">El motor matemático local no consulta el radar de noticias.</p>';
+        return;
+    }
     try {
+        if (engine === 'antigravity_cio') {
+            throw new Error('Antigravity CIO es un asesor macro separado; no está conectado como motor de señales de la Trinchera.');
+        }
         // Verificar si estamos dentro del horario de operación
         const scheduleMode = document.getElementById('scheduleModeSelect')?.value || 'libre';
         if (scheduleMode === 'custom') {
@@ -1754,7 +1876,8 @@ const ejecutarAnalisis = async () => {
         }
 
         const sentScore = window.currentSentimentScore || 0;
-        const url = `${API_BASE_URL}/api/market/analysis?symbol=${encodeURIComponent(targetSymbol)}&timeframe=${tf}&engine=${engine}&strategy=${strategyMode}&tp=${tpVal}&sl=${slVal}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}&fee=${feeRate}&spread=${spreadRate}&min_profit_pct=${minProfitPct}&has_position=${hasPosition}&entry_price=${entryPrice}`;
+        const modelParam = brain.model ? `&model=${encodeURIComponent(brain.model)}` : '';
+        const url = `${API_BASE_URL}/api/market/analysis?symbol=${encodeURIComponent(targetSymbol)}&timeframe=${tf}&engine=${engine}${modelParam}&strategy=${strategyMode}&tp=${tpVal}&sl=${slVal}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}&fee=${feeRate}&spread=${spreadRate}&min_profit_pct=${minProfitPct}&has_position=${hasPosition}&entry_price=${entryPrice}`;
         
         // Timeout que cubre cuerpo y conexión (Bloque 4 item 5)
         const timeoutMs = (engine === 'deepseek' || engine === 'ollama') ? 120000 : 45000;
@@ -2215,12 +2338,14 @@ async function updateMacroRadar() {
         return;
     }
 
-    const engine = document.getElementById('engineSelect')?.value || 'ollama';
+    const brain = parseBrainSelection(document.getElementById('engineSelect')?.value || 'local');
+    const engine = brain.engine === 'gemini' ? 'ai' : brain.engine;
+    const modelParam = brain.model ? `&model=${encodeURIComponent(brain.model)}` : '';
     const source = document.getElementById('investmentSourceSelect')?.value || 'hybrid';
     container.innerHTML = `<p class="text-xs text-yellow-500 text-center py-2 animate-pulse">Consultando radar de oportunidades (${source})...</p>`;
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/macro/radar?engine=${engine}&source=${source}`, {
+        const response = await fetch(`${API_BASE_URL}/api/macro/radar?engine=${engine}&source=${source}${modelParam}`, {
             headers: apiAuthHeaders()
         });
         const data = await response.json();
@@ -3346,7 +3471,8 @@ function updateBrainBadge() {
     
     if (!engineSelect) return;
     
-    const value = engineSelect.value;
+    const selectedBrain = parseBrainSelection(engineSelect.value);
+    const value = selectedBrain.engine === 'gemini' ? 'ai' : selectedBrain.engine;
     const text = engineSelect.options[engineSelect.selectedIndex].text;
     
     // Sincronizar el texto del badge de lectura
@@ -3912,13 +4038,15 @@ document.addEventListener("DOMContentLoaded", () => {
             
             premarketAbortController = new AbortController();
             const lobbyEngineEl = document.getElementById("lobbyEngineSelect");
-            const engine = lobbyEngineEl?.value || "deepseek";
+            const selectedBrain = parseBrainSelection(lobbyEngineEl?.value || "local");
+            const engine = selectedBrain.engine === "gemini" ? "gemini" : selectedBrain.engine;
+            const modelParam = selectedBrain.model ? `&model=${encodeURIComponent(selectedBrain.model)}` : "";
             const engineName = lobbyEngineEl?.options[lobbyEngineEl.selectedIndex]?.text || engine;
             lobbyReportBox.classList.remove("hidden");
             lobbyReportBox.innerHTML = `<span class="text-yellow-400">Consultando a <strong>${escapeHtml(engineName)}</strong> (sin límite de tiempo; puedes pulsar 'Cancelar' en cualquier momento)...</span>`;
             
             try {
-                const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`, {
+                const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}${modelParam}`, {
                     headers: apiAuthHeaders(),
                     signal: premarketAbortController.signal
                 });
@@ -4019,6 +4147,8 @@ document.addEventListener('wheel', (e) => {
         document.activeElement.blur();
     }
 }, { passive: true });
+
+document.addEventListener('DOMContentLoaded', startBrainSelectorSync, { once: true });
 
 // ==============================================================================
 // // TODO(FASE5):

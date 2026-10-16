@@ -136,13 +136,17 @@ cp backend/.env.example .env
 ```
 
 ### 3. Ejecutar los Lanzadores Seguros
-* **En Linux:**
+* **Solo Trading Ollama, en Linux:**
   ```bash
   chmod +x lanzar_bot.sh
   ./lanzar_bot.sh
   ```
 * **En Windows:**
   Doble clic en `lanzar_bot.bat`.
+
+Para iniciar Trading Ollama y el proyecto vecino **Monitor del Mercado** como una unidad, usa `lanzar_todo.sh` (Linux) o `lanzar_todo.bat` (Windows). Ollama debe estar ejecutándose; el coordinador no inicia ni detiene el servicio de Ollama. Comprueba que los puertos `18767`, `18087` y `8520` estén libres. Si el Monitor no está en `../monitor del mercado`, define `MONITOR_PROJECT_DIR` con su ruta antes de lanzar.
+
+Los selectores de Pre-Market y Trinchera comparten el estado guardado en `backend/config/brain_state.json`. El endpoint `/api/system/models` descubre las etiquetas instaladas en Ollama; el estado central se expone en `/api/system/brain`. Ambos proyectos deben ejecutarse en la misma máquina para compartir esta selección.
 
 Los lanzadores verificarán los puertos locales:
 * **API Backend:** `http://127.0.0.1:18767`

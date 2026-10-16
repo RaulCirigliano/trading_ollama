@@ -13,3 +13,4 @@ historial_trades.csv
 historial_trades_legacy.csv
 scripts_antiguos/
 buzon_radar.json
+backend/config/brain_state.json

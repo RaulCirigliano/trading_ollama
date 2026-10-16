@@ -8,6 +8,7 @@ import time
 import re
 import hmac
 import csv
+import json
 import threading
 import requests
 import math
@@ -20,6 +21,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_FILE_PATH = os.path.join(PROJECT_ROOT, ".env")
 CSV_FILE_PATH = os.path.join(PROJECT_ROOT, "historial_trades.csv")
 CSV_LEGACY_PATH = os.path.join(PROJECT_ROOT, "historial_trades_legacy.csv")
+SHARED_DIRECTIVES_PATH = os.path.join(PROJECT_ROOT, "guias", "directivas_cerebro.md")
+BRAIN_STATE_PATH = os.path.join(PROJECT_ROOT, "backend", "config", "brain_state.json")
 
 # Cargar variables de entorno desde la raíz del proyecto
 load_dotenv(ENV_FILE_PATH)
@@ -42,8 +45,10 @@ app.add_middleware(
         "http://localhost:18767",
         "http://127.0.0.1:18087",
         "http://localhost:18087",
+        "http://127.0.0.1:8520",
+        "http://localhost:8520",
     ],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|100\.\d+\.\d+\.\d+)(:(18767|18087|8080|3000|5500|5173))?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|100\.\d+\.\d+\.\d+)(:(18767|18087|8520|8080|3000|5500|5173))?$",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,6 +61,10 @@ CSV_LOCK = threading.Lock()
 _CACHE_LOCK = threading.Lock()
 _KEY_LOCKS: Dict[str, threading.Lock] = {}
 _CACHE_DATA: Dict[str, Dict[str, Any]] = {}
+_BRAIN_STATE_LOCK = threading.Lock()
+_OLLAMA_MODELS_LOCK = threading.Lock()
+_OLLAMA_MODELS_CACHE: List[str] = []
+_OLLAMA_MODELS_CACHE_TS = 0.0
 
 # Símbolos soportados alineados estrictamente con el selector del frontend (Bloque 5 item 3)
 SUPPORTED_SYMBOLS = [
@@ -266,6 +275,11 @@ def get_cached_price(symbol: str):
 class ApiKeyRequest(BaseModel):
     api_key: str
 
+
+class BrainStateRequest(BaseModel):
+    engine: str = Field(min_length=1, max_length=40)
+    model: Optional[str] = Field(default=None, max_length=120)
+
 class MacroInjectionRequest(BaseModel):
     asset: str = Field(min_length=1, max_length=30, pattern=r"^[A-Za-z0-9_=./^\-]+$")
     text: str = Field(min_length=1, max_length=5000)
@@ -310,6 +324,114 @@ def save_gemini_key(req: ApiKeyRequest, request: Request, x_api_token: Optional[
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Motor de Trading AI en línea"}
+
+
+def _read_brain_state() -> Dict[str, Optional[str]]:
+    if not os.path.exists(BRAIN_STATE_PATH):
+        return {"engine": "ollama", "model": None}
+    try:
+        with open(BRAIN_STATE_PATH, "r", encoding="utf-8") as state_file:
+            state = json.load(state_file)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="No se pudo leer la configuración central del cerebro.") from exc
+    if not isinstance(state, dict):
+        raise HTTPException(status_code=500, detail="La configuración central del cerebro tiene un formato inválido.")
+    return _validate_brain_state(state.get("engine"), state.get("model"))
+
+
+def _validate_brain_state(engine: Any, model: Any) -> Dict[str, Optional[str]]:
+    if not isinstance(engine, str) or engine not in {"ollama", "gemini", "local", "antigravity_cio"}:
+        raise HTTPException(status_code=422, detail="Motor de cerebro no soportado.")
+    clean_model = model.strip() if isinstance(model, str) else None
+    if engine == "ollama":
+        if not _is_valid_ollama_model_name(clean_model):
+            raise HTTPException(status_code=422, detail="Selecciona un modelo Ollama válido.")
+    elif clean_model and not re.fullmatch(r"[A-Za-z0-9._:/-]{1,120}", clean_model):
+        raise HTTPException(status_code=422, detail="Nombre de modelo inválido.")
+    return {"engine": engine, "model": clean_model or None}
+
+
+def _is_valid_ollama_model_name(model: Any) -> bool:
+    if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9._:/-]{1,120}", model):
+        return False
+    return all(part not in {"", ".", ".."} for part in model.split("/"))
+
+
+def _shared_brain_directives() -> str:
+    try:
+        with open(SHARED_DIRECTIVES_PATH, "r", encoding="utf-8") as directives_file:
+            return directives_file.read()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="No se pudieron leer las directivas canónicas del cerebro.") from exc
+
+
+@app.get("/api/system/models")
+def get_system_models(request: Request, x_api_token: Optional[str] = Header(None)):
+    verify_auth_token(request, x_api_token)
+    global _OLLAMA_MODELS_CACHE_TS
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=3)
+        response.raise_for_status()
+        payload = response.json()
+        raw_models = payload.get("models", []) if isinstance(payload, dict) else []
+        models = sorted({
+            item.get("name", "").strip()
+            for item in raw_models
+            if isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and _is_valid_ollama_model_name(item["name"].strip())
+        })
+        with _OLLAMA_MODELS_LOCK:
+            _OLLAMA_MODELS_CACHE[:] = models
+            _OLLAMA_MODELS_CACHE_TS = time.time()
+        return {"available": True, "models": models, "cached_at": _OLLAMA_MODELS_CACHE_TS}
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        with _OLLAMA_MODELS_LOCK:
+            cached_models = list(_OLLAMA_MODELS_CACHE)
+            cached_at = _OLLAMA_MODELS_CACHE_TS or None
+        return {
+            "available": False,
+            "models": cached_models,
+            "cached_at": cached_at,
+            "error": "Ollama no está disponible; se conserva la última lista conocida." if cached_models
+                else "Ollama no está disponible y todavía no hay una lista de modelos en caché.",
+        }
+
+
+@app.get("/api/system/brain")
+def get_system_brain(request: Request, x_api_token: Optional[str] = Header(None)):
+    verify_auth_token(request, x_api_token)
+    with _BRAIN_STATE_LOCK:
+        return _read_brain_state()
+
+
+@app.post("/api/system/brain")
+def set_system_brain(
+    req: BrainStateRequest,
+    request: Request,
+    x_api_token: Optional[str] = Header(None),
+):
+    verify_auth_token(request, x_api_token)
+    state = _validate_brain_state(req.engine, req.model)
+    state_dir = os.path.dirname(BRAIN_STATE_PATH)
+    temp_path = f"{BRAIN_STATE_PATH}.tmp"
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        with _BRAIN_STATE_LOCK:
+            with open(temp_path, "w", encoding="utf-8") as state_file:
+                json.dump(state, state_file, ensure_ascii=False, indent=2)
+                state_file.flush()
+                os.fsync(state_file.fileno())
+            os.replace(temp_path, BRAIN_STATE_PATH)
+    except OSError as exc:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=500, detail="No se pudo guardar la configuración central del cerebro.") from exc
+    return state
+
 
 @app.get("/api/market/price")
 def get_price(symbol: str = "BTC/USDT"):
@@ -476,7 +598,8 @@ def get_current_injected_macro(request: Request, x_api_token: Optional[str] = He
         for c in reversed(cards):
             raw_imp = str(c.impacto).strip().upper()
             is_opp = raw_imp in ["POSITIVO", "OPORTUNIDAD"]
-            if is_opp and c.confianza >= 80:
+            c_asset = str(c.activo or "").strip().upper()
+            if is_opp and c.confianza >= 80 and c_asset and c_asset not in {"GENERAL", "NONE", "N/A"}:
                 try:
                     c_ts = parse_iso_timestamp(c.timestamp).timestamp()
                     best_monitor_card = c
@@ -518,8 +641,18 @@ def get_current_injected_macro(request: Request, x_api_token: Optional[str] = He
 
 # --- MACRO RADAR Y BUZÓN ---
 @app.get("/api/macro/radar")
-def get_macro_radar(request: Request, engine: str = "ollama", source: str = "native", x_api_token: Optional[str] = Header(None)):
+def get_macro_radar(
+    request: Request,
+    engine: str = "ollama",
+    source: str = "native",
+    model: Optional[str] = None,
+    x_api_token: Optional[str] = Header(None),
+):
     verify_auth_token(request, x_api_token)
+    if engine not in {"gemini", "ai", "ollama", "qwen", "deepseek"}:
+        return {"status": "error", "message": "El motor seleccionado no está disponible para informes Pre-Market."}
+    if engine in {"ollama", "qwen", "deepseek"} and model and not _is_valid_ollama_model_name(model):
+        raise HTTPException(status_code=422, detail="Nombre de modelo inválido.")
     try:
         import requests
         import feedparser
@@ -632,7 +765,11 @@ def get_macro_radar(request: Request, engine: str = "ollama", source: str = "nat
 
         news_text = "\n".join(titulares)
 
+        shared_directives = _shared_brain_directives() if engine not in {"local", "antigravity_cio"} else ""
         prompt = f'''
+        DIRECTIVAS CANÓNICAS COMPARTIDAS:
+        {shared_directives}
+
         Eres un Analista Macro y Agente de Inversiones Institucional.
         Mantén tu razonamiento interno muy breve.
         Lee los siguientes titulares recientes:
@@ -718,9 +855,10 @@ def get_macro_radar(request: Request, engine: str = "ollama", source: str = "nat
             if not acquired:
                 return append_monitor_cards([{"asset": "BUSY", "type": "Peligro", "confidence": 0, "reason": "Ollama ocupado", "schedule": "-"}])
             try:
-                opp_model = "trader-qwen" if engine == "qwen" else ("trader-deepseek" if engine == "deepseek" else "trader-ia")
+                opp_model = model or ("trader-qwen" if engine == "qwen" else ("trader-deepseek" if engine == "deepseek" else "trader-ia"))
                 payload = {
                     "model": opp_model,
+                    "system": shared_directives,
                     "prompt": prompt,
                     "stream": False
                 }
@@ -765,8 +903,15 @@ def get_macro_radar(request: Request, engine: str = "ollama", source: str = "nat
         return [{"asset": "SYS_ERR", "type": "Peligro", "confidence": 0, "reason": str(e), "schedule": "-"}]
 
 @app.get("/api/macro/premarket")
-def get_premarket_digest(request: Request, engine: str = "gemini", x_api_token: Optional[str] = Header(None)):
+def get_premarket_digest(
+    request: Request,
+    engine: str = "gemini",
+    model: Optional[str] = None,
+    x_api_token: Optional[str] = Header(None),
+):
     verify_auth_token(request, x_api_token)
+    if model and not _is_valid_ollama_model_name(model):
+        raise HTTPException(status_code=422, detail="Nombre de modelo inválido.")
     PREMARKET_CANCEL_EVENT.clear()
     try:
         from backend.premarket_digest import run_premarket_digest
@@ -775,11 +920,11 @@ def get_premarket_digest(request: Request, engine: str = "gemini", x_api_token: 
             if not acquired:
                 return {"status": "busy", "message": "Ollama ocupado procesando otra tarea."}
             try:
-                return run_premarket_digest(engine=engine, cancel_event=PREMARKET_CANCEL_EVENT)
+                return run_premarket_digest(engine=engine, model=model, cancel_event=PREMARKET_CANCEL_EVENT)
             finally:
                 OLLAMA_LOCK.release()
         else:
-            return run_premarket_digest(engine=engine, cancel_event=PREMARKET_CANCEL_EVENT)
+            return run_premarket_digest(engine=engine, model=model, cancel_event=PREMARKET_CANCEL_EVENT)
     except ImportError:
         return {"status": "error", "message": "Módulo backend.premarket_digest no disponible."}
     except Exception as e:
@@ -911,6 +1056,7 @@ def get_analysis(
     symbol: str = "BTC/USDT",
     timeframe: str = "1m",
     engine: str = "local",
+    model: Optional[str] = None,
     strategy: str = "manual",
     tp: float = Query(3.0, gt=0, le=100, allow_inf_nan=False),
     sl: float = Query(2.0, gt=0, le=100, allow_inf_nan=False),
@@ -929,6 +1075,13 @@ def get_analysis(
     validate_timeframe(timeframe)
     if strategy not in {"manual", "mean_reversion_atr"}:
         raise HTTPException(status_code=422, detail="Estrategia no soportada.")
+    if engine not in {"local", "ai", "gemini", "deepseek", "ollama", "qwen"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Este motor no está conectado como analista de señales de la Trinchera.",
+        )
+    if model and not _is_valid_ollama_model_name(model):
+        raise HTTPException(status_code=422, detail="Nombre de modelo inválido.")
     if strategy == "mean_reversion_atr" and timeframe not in ATR_STRATEGY_TIMEFRAMES:
         raise HTTPException(
             status_code=422,
@@ -942,6 +1095,7 @@ def get_analysis(
         round_trip_spread = round(spread * 2.0, 3)
         round_trip_cost = round(round_trip_fee + round_trip_spread, 3)
         net_tp = round(net_return_after_costs(tp, fee, spread), 4)
+        shared_directives = _shared_brain_directives() if engine != "local" else ""
 
         # Fees and spread are already deducted by net_return_after_costs.
         if strategy == "manual" and not has_position and net_tp < min_profit_pct:
@@ -1124,7 +1278,7 @@ def get_analysis(
 
                     # PromptTemplate con llaves escapadas {{ }} en el JSON de ejemplo (Bloque 5 items 1 y 7)
                     prompt_tmpl = PromptTemplate.from_template(
-                        "Eres un Senior Quantitative Trader Institucional operando algorítmicamente.\n"
+                        "{shared_directives}\n\nEres un Senior Quantitative Trader Institucional operando algorítmicamente.\n"
                         "El usuario opera en velas de {timeframe}, arriesgando el {riesgo}%.\n"
                         "TP (+{tp}%) y SL (-{sl}%) son movimientos BRUTOS de precio. La rentabilidad neta estimada del TP tras costos es +{net_tp}%.\n\n"
                         "COSTOS DEL BROKER:\n"
@@ -1153,6 +1307,7 @@ def get_analysis(
                     pos_info = f"Posición ACTIVA ya abierta a ${entry_price}." if has_position else "Sin posición abierta (100% liquidez)."
                     chain = prompt_tmpl | llm
                     respuesta = chain.invoke({
+                        "shared_directives": shared_directives,
                         "timeframe": timeframe,
                         "riesgo": int(risk * 100),
                         "tp": prompt_tp,
@@ -1212,6 +1367,9 @@ def get_analysis(
                     pos_info = f"Posición abierta a ${entry_price}." if has_position else "Sin posición previa."
                     macro_block = build_macro_directive(macro)
                     prompt_text = f'''
+                    DIRECTIVAS CANÓNICAS COMPARTIDAS:
+                    {shared_directives}
+
                     Eres un Senior Quantitative Trader Institucional operando algorítmicamente.
                     Mercado: {symbol}. Velas: {timeframe}. Riesgo: {int(risk * 100)}%. TP bruto: +{prompt_tp}% de precio. SL bruto: -{prompt_sl}% de precio.
                     Comisión: {fee}% por orden ({round_trip_fee}% ida y vuelta). Spread estimado: {spread}% por lado ({round_trip_spread}% ida y vuelta).
@@ -1311,6 +1469,9 @@ def get_analysis(
                     pos_info = f"Posición abierta a ${entry_price}." if has_position else "Sin posición."
                     macro_block = build_macro_directive(macro)
                     prompt_text = f'''
+                    DIRECTIVAS CANÓNICAS COMPARTIDAS:
+                    {shared_directives}
+
                     Eres un Senior Quantitative Trader Institucional operando algorítmicamente.
                     Mercado: {symbol}. Velas: {timeframe}. Riesgo: {int(risk * 100)}%. TP bruto: +{prompt_tp}% de precio. SL bruto: -{prompt_sl}% de precio.
                     Comisión: {fee}% por orden ({round_trip_fee}% ida y vuelta). Spread estimado: {spread}% por lado ({round_trip_spread}% ida y vuelta).
@@ -1339,7 +1500,8 @@ def get_analysis(
                     '''
 
                     payload = {
-                        "model": "trader-ia",
+                        "model": model or (_read_brain_state().get("model") if engine == "ollama" else None) or "trader-ia",
+                        "system": shared_directives,
                         "prompt": prompt_text,
                         "stream": False,
                         "format": "json"
@@ -1384,6 +1546,9 @@ def get_analysis(
                     pos_info = f"Posición abierta a ${entry_price}." if has_position else "Sin posición."
                     macro_block = build_macro_directive(macro)
                     prompt_text = f'''
+                    DIRECTIVAS CANÓNICAS COMPARTIDAS:
+                    {shared_directives}
+
                     Eres un Senior Quantitative Trader Institucional operando algorítmicamente.
                     Mercado: {symbol}. Velas: {timeframe}. Riesgo: {int(risk * 100)}%. TP bruto: +{prompt_tp}% de precio. SL bruto: -{prompt_sl}% de precio.
                     Comisión: {fee}% por orden ({round_trip_fee}% ida y vuelta). Spread estimado: {spread}% por lado ({round_trip_spread}% ida y vuelta).
@@ -1596,4 +1761,3 @@ if __name__ == "__main__":
     import uvicorn
     # Arranque estandarizado backend.main:app (Bloque 5 item 8)
     uvicorn.run("backend.main:app", host="127.0.0.1", port=18767, reload=False)
-

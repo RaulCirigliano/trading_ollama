@@ -20,7 +20,16 @@
         if (exactMatches.length > 1) return null;
 
         const baseMatches = symbols.filter(symbol => canonical(String(symbol).split(/[/-]/, 1)[0]) === key);
-        return baseMatches.length === 1 ? baseMatches[0] : null;
+        if (baseMatches.length === 1) return baseMatches[0];
+        if (baseMatches.length > 1) return null;
+
+        const quoteMatch = key.match(/^([A-Z0-9]+)(?:USD|USDT)$/);
+        if (quoteMatch) {
+            const baseKey = quoteMatch[1];
+            const quoteMatches = symbols.filter(symbol => canonical(String(symbol).split(/[/-]/, 1)[0]) === baseKey);
+            if (quoteMatches.length === 1) return quoteMatches[0];
+        }
+        return null;
     }
 
     function isFreshQuote(quote) {

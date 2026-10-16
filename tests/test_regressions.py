@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import json
 import math
 from types import SimpleNamespace
 import time
@@ -22,6 +23,77 @@ def clear_optional_api_token(monkeypatch):
 
 def test_premarket_annotations_resolve():
     assert "cancel_event" in get_type_hints(premarket_digest.run_premarket_digest)
+
+
+def test_system_models_returns_real_names_and_caches_them(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "qwen2.5:3b"}, {"name": "deepseek-r1:8b"}, {"name": "../invalid"}]}
+
+    monkeypatch.setattr(main.requests, "get", lambda *args, **kwargs: FakeResponse())
+    response = TestClient(main.app).get("/api/system/models")
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["models"] == ["deepseek-r1:8b", "qwen2.5:3b"]
+
+
+def test_system_models_degrades_gracefully_when_ollama_is_offline(monkeypatch):
+    monkeypatch.setattr(main, "_OLLAMA_MODELS_CACHE", ["qwen2.5:3b"])
+    monkeypatch.setattr(main, "_OLLAMA_MODELS_CACHE_TS", 123.0)
+
+    def fail_request(*args, **kwargs):
+        raise main.requests.ConnectionError("offline")
+
+    monkeypatch.setattr(main.requests, "get", fail_request)
+    response = TestClient(main.app).get("/api/system/models")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": False,
+        "models": ["qwen2.5:3b"],
+        "cached_at": 123.0,
+        "error": "Ollama no está disponible; se conserva la última lista conocida.",
+    }
+
+
+def test_system_brain_post_persists_valid_selection(monkeypatch, tmp_path):
+    state_path = tmp_path / "backend-config" / "brain_state.json"
+    monkeypatch.setattr(main, "BRAIN_STATE_PATH", str(state_path))
+    response = TestClient(main.app).post(
+        "/api/system/brain",
+        json={"engine": "ollama", "model": "deepseek-r1:8b"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"engine": "ollama", "model": "deepseek-r1:8b"}
+    assert json.loads(state_path.read_text(encoding="utf-8")) == response.json()
+    assert TestClient(main.app).get("/api/system/brain").json() == response.json()
+
+
+def test_system_brain_rejects_invalid_selection():
+    response = TestClient(main.app).post(
+        "/api/system/brain",
+        json={"engine": "ollama", "model": "../untrusted"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_system_brain_cors_allows_monitor_origin():
+    response = TestClient(main.app).options(
+        "/api/system/brain",
+        headers={
+            "Origin": "http://127.0.0.1:8520",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:8520"
 
 
 def test_current_macro_promotes_timezone_aware_monitor_card(monkeypatch):
