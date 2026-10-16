@@ -163,7 +163,7 @@ def main() -> int:
         trading_python = python_for(TRADING_ROOT)
         monitor_python = python_for(MONITOR_ROOT)
         backend = start_child(
-            [str(trading_python), "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "18767"],
+            [str(trading_python), "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "18767", "--reload"],
             TRADING_ROOT,
             "backend Trading Ollama",
         )

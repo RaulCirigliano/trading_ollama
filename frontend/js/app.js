@@ -974,8 +974,11 @@ function getMinimumNetProfitPct() {
 }
 
 function getStrategyMode() {
-    const mode = document.getElementById('strategyModeSelect')?.value || 'manual';
-    return mode === 'mean_reversion_atr' ? mode : 'manual';
+    return document.getElementById('strategyModeSelect')?.value || 'manual';
+}
+
+function isQuantStrategyMode(mode = getStrategyMode()) {
+    return ['mean_reversion_atr', 'nasdaq_araujo_vwap', 'hyenuk_chu_multibagger'].includes(mode);
 }
 
 function getQuantRiskBudgetPct() {
@@ -984,9 +987,30 @@ function getQuantRiskBudgetPct() {
 }
 
 function updateStrategySettingsVisibility() {
-    const quantMode = getStrategyMode() === 'mean_reversion_atr';
+    const mode = getStrategyMode();
+    const quantMode = isQuantStrategyMode(mode);
     document.getElementById('manualTpSlSettings')?.classList.toggle('hidden', quantMode);
     document.getElementById('quantRiskBudgetSettings')?.classList.toggle('hidden', !quantMode);
+
+    const desc = document.getElementById('strategyDescriptionText');
+    if (desc) {
+        if (mode === 'mean_reversion_atr') {
+            desc.innerText = 'La estrategia ATR calcula TP=2.5×ATR y SL=1.5×ATR; requiere Z≤−2, régimen EMA200, absorción y costos cubiertos. Python filtra primero; la IA seleccionada solo puede vetar.';
+        } else if (mode === 'nasdaq_araujo_vwap') {
+            desc.innerText = 'Estrategia Franklin Araujo (Nasdaq / 15m): Confluencia de VWAP diario institucional, rango de Londres y quiebre de extremos M15. Máximo 1 trade al día con Stop Loss inmediato.';
+        } else if (mode === 'hyenuk_chu_multibagger') {
+            desc.innerText = 'Estrategia Hyenuk Chu (Trend & Multibagger / 1h): Seguimiento de tendencia institucional sobre EMA200 con filtro contrario anti-euforia (RSI ≤ 75) y política de toma parcial (Trim).';
+        } else {
+            desc.innerText = 'Modo Manual / Discrecional: Utiliza los niveles porcentuales fijos de TP y SL configurados en el panel.';
+        }
+    }
+    const badge = document.getElementById('activeStrategyBadgeText');
+    if (badge) {
+        if (mode === 'mean_reversion_atr') badge.innerText = 'Reversión ATR';
+        else if (mode === 'nasdaq_araujo_vwap') badge.innerText = 'Nasdaq Araujo (M15)';
+        else if (mode === 'hyenuk_chu_multibagger') badge.innerText = 'Chu Multibagger (1h)';
+        else badge.innerText = 'Manual';
+    }
 }
 
 function updateBrokerFeeDisplay() {
@@ -1035,27 +1059,151 @@ minProfitPctInput?.addEventListener('change', () => {
 
 const strategyModeSelect = document.getElementById('strategyModeSelect');
 const savedStrategyMode = localStorage.getItem('ai_strategy_mode_v1');
-if (strategyModeSelect && ['manual', 'mean_reversion_atr'].includes(savedStrategyMode)) {
+if (strategyModeSelect && ['manual', 'mean_reversion_atr', 'nasdaq_araujo_vwap', 'hyenuk_chu_multibagger'].includes(savedStrategyMode)) {
     strategyModeSelect.value = savedStrategyMode;
 }
 strategyModeSelect?.addEventListener('change', () => {
-    localStorage.setItem('ai_strategy_mode_v1', getStrategyMode());
+    const mode = getStrategyMode();
+    localStorage.setItem('ai_strategy_mode_v1', mode);
     updateStrategySettingsVisibility();
-    if (getStrategyMode() === 'mean_reversion_atr') {
+    if (mode === 'mean_reversion_atr') {
         const tfSelect = document.getElementById('timeframeSelect');
         if (tfSelect && !tradingGuards.isAllowedAtrTimeframe(tfSelect.value)) {
             tfSelect.value = '15m';
             logToTerminal('ℹ️ La estrategia ATR requiere temporalidad de 15m o 1h. Ajustando automáticamente a 15m.', 'info');
         }
+        logToTerminal('🧮 Estrategia cuantitativa ATR seleccionada para las próximas posiciones simuladas.', 'info');
+    } else if (mode === 'nasdaq_araujo_vwap') {
+        const tfSelect = document.getElementById('timeframeSelect');
+        if (tfSelect && tfSelect.value !== '15m') {
+            tfSelect.value = '15m';
+            logToTerminal('ℹ️ La estrategia Nasdaq Araujo opera estrictamente en 15m. Ajustando automáticamente a 15m.', 'info');
+        }
+        const symSelect = document.getElementById('symbolSelect');
+        if (symSelect && !['QQQ', 'NQ=F', 'MNQ'].includes(symSelect.value)) {
+            symSelect.value = 'QQQ';
+            logToTerminal('🎯 Seleccionando QQQ (Nasdaq 100) para la Estrategia Araujo.', 'info');
+            symSelect.dispatchEvent(new Event('change'));
+        }
+        logToTerminal('🏛️ Estrategia Nasdaq Araujo (VWAP + M15 + Londres) activada.', 'info');
+    } else if (mode === 'hyenuk_chu_multibagger') {
+        const tfSelect = document.getElementById('timeframeSelect');
+        if (tfSelect && tfSelect.value !== '1h') {
+            tfSelect.value = '1h';
+            logToTerminal('ℹ️ La estrategia Hyenuk Chu opera en 1h (Swing / Trend Following). Ajustando automáticamente a 1h.', 'info');
+        }
+        const symSelect = document.getElementById('symbolSelect');
+        if (symSelect && !['NVDA', 'TSLA', 'BTC/USDT', 'SOL/USDT', 'QQQ'].includes(symSelect.value)) {
+            symSelect.value = 'NVDA';
+            logToTerminal('🤖 Seleccionando Nvidia (NVDA) para la Estrategia Hyenuk Chu Trend.', 'info');
+            symSelect.dispatchEvent(new Event('change'));
+        }
+        logToTerminal('🚀 Estrategia Hyenuk Chu (Trend Following & Multibagger / 1h) activada.', 'info');
+    } else {
+        logToTerminal('⚙️ Estrategia manual seleccionada: TP/SL del desplegable.', 'info');
     }
-    logToTerminal(
-        getStrategyMode() === 'mean_reversion_atr'
-            ? '🧮 Estrategia cuantitativa ATR seleccionada para las próximas posiciones simuladas.'
-            : '⚙️ Estrategia manual seleccionada: TP/SL del desplegable.',
-        'info'
-    );
 });
 updateStrategySettingsVisibility();
+
+// --- HUB / CATÁLOGO DE ESTRATEGIAS CUANTITATIVAS ---
+async function fetchAndRenderStrategiesHub() {
+    const container = document.getElementById('strategiesHubCardsContainer');
+    if (!container) return;
+    container.innerHTML = '<div class="col-span-full py-8 text-center text-gray-400 animate-pulse">Cargando catálogo modular de estrategias...</div>';
+    
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/strategies`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const strategies = await res.json();
+        const activeMode = getStrategyMode();
+
+        container.innerHTML = '';
+        strategies.forEach(strat => {
+            const isActive = strat.id === activeMode;
+            const card = document.createElement('div');
+            card.className = `p-4 rounded-xl border transition flex flex-col justify-between ${
+                isActive 
+                    ? 'bg-indigo-950/40 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.25)]' 
+                    : 'bg-gray-900/90 border-gray-700 hover:border-gray-500'
+            }`;
+
+            const badgeStatus = isActive
+                ? '<span class="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-500/40 animate-pulse">ACTIVA</span>'
+                : '<span class="text-[10px] bg-gray-700 text-gray-400 font-semibold px-2 py-0.5 rounded">DISPONIBLE</span>';
+
+            const assetsBadges = (strat.activos_recomendados || []).map(a => 
+                `<span class="text-[10px] bg-gray-800 text-yellow-400 px-1.5 py-0.5 rounded border border-gray-700 font-mono">${a}</span>`
+            ).join(' ');
+
+            const tfsBadges = (strat.temporalidades_permitidas || []).map(t => 
+                `<span class="text-[10px] bg-gray-800 text-blue-400 px-1.5 py-0.5 rounded border border-gray-700 font-mono">${t}</span>`
+            ).join(' ');
+
+            card.innerHTML = `
+                <div>
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="font-bold text-white text-sm tracking-wide">${strat.nombre}</h3>
+                        ${badgeStatus}
+                    </div>
+                    <p class="text-[11px] text-gray-400 mb-3 leading-relaxed">${strat.descripcion}</p>
+                    
+                    <div class="space-y-1.5 text-xs text-gray-300 border-t border-gray-800 pt-2 mb-3">
+                        <div class="flex justify-between items-center text-[11px]">
+                            <span class="text-gray-500">Autor / Origen:</span>
+                            <span class="font-semibold text-gray-300">${strat.autor}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-[11px]">
+                            <span class="text-gray-500">Horario:</span>
+                            <span class="font-semibold text-gray-300">${strat.horario_operativo || '24/7'}</span>
+                        </div>
+                        <div class="text-[11px] pt-1">
+                            <span class="text-gray-500 block mb-1">Temporalidades:</span>
+                            <div class="flex flex-wrap gap-1">${tfsBadges}</div>
+                        </div>
+                        <div class="text-[11px] pt-1">
+                            <span class="text-gray-500 block mb-1">Activos idóneos:</span>
+                            <div class="flex flex-wrap gap-1">${assetsBadges}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-2 border-t border-gray-800">
+                    ${isActive
+                        ? '<button disabled class="w-full bg-emerald-600/30 text-emerald-300 font-bold text-xs py-2 rounded border border-emerald-500/40 cursor-default">✓ Estrategia Seleccionada</button>'
+                        : `<button onclick="window.selectStrategyFromHub('${strat.id}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded transition shadow border border-indigo-400/50 cursor-pointer">🚀 Activar esta Estrategia</button>`
+                    }
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    } catch (err) {
+        container.innerHTML = `<div class="col-span-full py-8 text-center text-red-400">Error al cargar estrategias: ${err.message}</div>`;
+    }
+}
+
+window.selectStrategyFromHub = function(strategyId) {
+    if (!strategyModeSelect) return;
+    strategyModeSelect.value = strategyId;
+    strategyModeSelect.dispatchEvent(new Event('change'));
+    fetchAndRenderStrategiesHub();
+    updateStrategySettingsVisibility();
+};
+
+function openStrategiesHub() {
+    document.getElementById('strategiesHubModal')?.classList.remove('hidden');
+    fetchAndRenderStrategiesHub();
+}
+
+function closeStrategiesHub() {
+    document.getElementById('strategiesHubModal')?.classList.add('hidden');
+}
+
+document.getElementById('btnOpenStrategiesModal')?.addEventListener('click', openStrategiesHub);
+document.getElementById('btnOpenStrategiesHub')?.addEventListener('click', openStrategiesHub);
+document.getElementById('btnCloseStrategiesHub')?.addEventListener('click', closeStrategiesHub);
+document.getElementById('strategiesHubModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'strategiesHubModal') closeStrategiesHub();
+});
 
 
 const quantRiskBudgetSelect = document.getElementById('quantRiskBudgetSelect');

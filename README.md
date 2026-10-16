@@ -60,22 +60,48 @@ En el panel de **Ajustes**, el operador puede definir el **Beneficio Neto Mínim
 
 ---
 
-## 🧮 Estrategia Cuantitativa ATR (Plan Argon): Manual de Operación
+## 🧮 Catálogo Modular de Estrategias y Hub Visual
 
-Además del modo Manual (donde el usuario elige libremente su TP/SL), el sistema incorpora la estrategia institucional **`mean_reversion_atr`**.
+El sistema opera bajo un **Patrón Estrategia desacoplado** ubicado en [`backend/estrategias/`](file:///home/raul/Escritorio/proyectos/trading_ollama/backend/estrategias/). El operador puede explorar y activar cada estrategia directamente desde el nuevo **Hub de Estrategias** en el panel web (botón `🎯 Estrategias` en la barra superior o en Ajustes).
 
-### 1. Restricción Estricta de Temporalidad (Solo 15m y 1h)
-* **Regla Anti-Ruido:** La estrategia ATR **solo puede ejecutarse en velas de 15 minutos o 1 hora**. En gráficos de 1m o 5m, el mercado es puro ruido aleatorio y el diferencial de comisiones destruye la ventaja estadística.
-* **Blindaje:** Cualquier petición directa a la API en 1m o 5m bajo modo ATR es rechazada inmediatamente por el backend con código **HTTP 422**. En el frontend, si el usuario selecciona modo ATR estando en 1m o 5m, la interfaz se auto-ajusta a 15m con una advertencia en la terminal.
+```text
+trading_ollama/backend/estrategias/
+├── base.py                   # Interfaz unificada (EstrategiaBase)
+├── registry.py               # Catálogo dinámico y endpoint GET /api/strategies
+├── mean_reversion_atr.py     # Reversión a la media institucional ATR
+├── nasdaq_araujo_vwap.py     # Estrategia Nasdaq Franklin Araujo (VWAP + M15)
+└── hyenuk_chu_multibagger.py # Estrategia Hyenuk Chu: Trend & Multibagger (1h)
+```
 
-### 2. Filtros Deterministas de Python (Barrera Matemática de Entrada)
-Para que el motor genere una señal de compra, se deben cumplir **simultáneamente** todas las siguientes condiciones en velas cerradas:
-1. **Z-Score(20) $\le -2.0$** (`ATR_Z_SCORE_THRESHOLD = -2.0`): El precio sufrió una desviación extrema a la baja respecto a su media móvil de 20 períodos (pánico de corto plazo).
-2. **Régimen EMA200 Alcista:** El precio de cierre se mantiene por encima de la media móvil exponencial de 200 períodos, y la pendiente de dicha EMA (en 5 velas) es positiva. Operamos rebotes a favor de la tendencia mayor, nunca cuchillos cayendo en tendencias bajistas.
-3. **Mecha Inferior de Absorción $\ge 0.25$:** La mecha inferior de la vela analizada debe representar al menos el 25% del rango total de la vela, demostrando rechazo institucional de mínimos y entrada de liquidez compradora.
-4. **Volumen Relativo Sano $\le 3.5$:** El volumen no debe superar 3.5 veces el promedio de las 20 velas previas (evita trampas de liquidez por noticias catastróficas).
-5. **Cobertura Mínima de Costos ($3.5\times$):** El Take Profit proyectado ($2.5 \times \text{ATR14}$) debe superar al menos 3.5 veces el costo total estimado de comisiones y spread de ida y vuelta.
-6. **Stop Loss Fijo:** Definido matemáticamente en $1.5 \times \text{ATR14}$.
+### 1. Estrategia Cuantitativa ATR (Plan Argon)
+* **Temporalidad Estricta:** 15m o 1h (rechazo de 1m/5m con HTTP 422).
+* **Filtros Deterministas:**
+  1. $Z\text{-Score}(20) \le -2.0$ (sobreventa estadística extrema).
+  2. Régimen EMA200 alcista con pendiente no negativa.
+  3. Mecha inferior de absorción $\ge 0.25$.
+  4. Volumen relativo $\le 3.5$.
+  5. Cobertura de costos $\ge 3.5\times$ con $\text{TP} = 2.5 \times \text{ATR14}$ y $\text{SL} = 1.5 \times \text{ATR14}$.
+* **Supervisión IA:** El modelo (Gemini, Qwen, DeepSeek) corre a temperatura 0.0 y actúa exclusivamente con poder de veto.
+
+### 2. Estrategia Nasdaq Araujo (VWAP + M15 + Sesión Londres)
+Inspirada en las reglas objetivas de acción del precio de Franklin Araujo para el índice Nasdaq:
+* **Activos Idóneos:** `QQQ`, `NQ=F`, `MNQ`.
+* **Temporalidad Estricta:** Únicamente **15 minutos (`15m`)**.
+* **Ventana Operativa:** Campana de apertura americana (09:25 – 11:30 AM NY).
+* **Confluencia Requerida:**
+  * **Largos (Compra):** Precio > VWAP diario acumulado (desde Asia 18:00 NY) **Y** Precio > Rango de sesión de Londres (03:00–09:00 NY) **Y** Ruptura del máximo reciente en M15.
+  * **Cortos (Venta):** Precio < VWAP diario **Y** Precio < Rango de sesión de Londres **Y** Ruptura del mínimo reciente en M15.
+* **Disciplina Estricta:** Stop Loss obligatorio colocado inmediatamente y límite estricto de **1 único trade por día**.
+
+### 3. Estrategia Hyenuk Chu (Trend Following & Multibagger / 1h)
+Inspirada en las lecciones y filosofía de 20 años de experiencia bursátil de Hyenuk Chu:
+* **Activos Idóneos:** `NVDA`, `TSLA`, `BTC/USDT`, `SOL/USDT`, `QQQ` (activos de alto impulso).
+* **Temporalidad Estricta:** **1 hora (`1h`)** para capturar tendencias limpias y eliminar el ruido intradía.
+* **Filtros Institucionales:**
+  1. **Alineación Tendencial:** Precio sobre SMA20 y sobre EMA200 con pendiente alcista sostenida.
+  2. **Filtro Contrario Anti-Euforia:** Bloquea compras si $\text{RSI} > 75$ (Chu exige no comprar en techos de euforia consensuada ni perseguir impulsos parabólicos). Exige $\text{RSI} \ge 45$.
+  3. **Volumen Participante:** RVOL $\ge 0.90$.
+* **Política Asimétrica (Trim / "Peluqueo"):** Objetivo inicial para asegurar capital base y dejar correr el remanente en asimetría positiva hacia arriba libre de riesgo con Trailing Stop. Stop Loss obligatorio e inflexible.
 
 ---
 

@@ -110,6 +110,12 @@ from backend.quant_analysis import (
     evaluate_strategy_metrics,
     evaluate_local_engine_signal,
 )
+from backend.estrategias import (
+    get_supported_strategy_ids,
+    get_allowed_timeframes,
+    list_strategies,
+    get_strategy,
+)
 
 
 def validate_timeframe(timeframe: str):
@@ -431,6 +437,13 @@ def set_system_brain(
             pass
         raise HTTPException(status_code=500, detail="No se pudo guardar la configuración central del cerebro.") from exc
     return state
+
+
+@app.get("/api/strategies")
+@app.get("/api/estrategias")
+def get_available_strategies():
+    """Retorna el catálogo completo de estrategias disponibles (modulares)."""
+    return list_strategies()
 
 
 @app.get("/api/market/price")
@@ -1073,7 +1086,7 @@ def get_analysis(
     verify_auth_token(request, x_api_token)
     validate_symbol(symbol)
     validate_timeframe(timeframe)
-    if strategy not in {"manual", "mean_reversion_atr"}:
+    if strategy not in get_supported_strategy_ids():
         raise HTTPException(status_code=422, detail="Estrategia no soportada.")
     if engine not in {"local", "ai", "gemini", "deepseek", "ollama", "qwen"}:
         raise HTTPException(
@@ -1082,10 +1095,11 @@ def get_analysis(
         )
     if model and not _is_valid_ollama_model_name(model):
         raise HTTPException(status_code=422, detail="Nombre de modelo inválido.")
-    if strategy == "mean_reversion_atr" and timeframe not in ATR_STRATEGY_TIMEFRAMES:
+    allowed_tfs = get_allowed_timeframes(strategy)
+    if timeframe not in allowed_tfs:
         raise HTTPException(
             status_code=422,
-            detail=f"La estrategia 'mean_reversion_atr' solo admite temporalidades {sorted(list(ATR_STRATEGY_TIMEFRAMES))}. Recibido: '{timeframe}'."
+            detail=f"La estrategia '{strategy}' solo admite temporalidades {sorted(list(allowed_tfs))}. Recibido: '{timeframe}'."
         )
 
     try:
@@ -1202,21 +1216,24 @@ def get_analysis(
             min_profit_pct=min_profit_pct,
             round_trip_cost=round_trip_cost,
             net_tp_manual=net_tp,
+            df=df,
         )
         tp_gross_pct = strategy_metrics["tp_gross_pct"]
         sl_gross_pct = strategy_metrics["sl_gross_pct"]
         strategy_net_tp = strategy_metrics["tp_net_pct"]
         strategy_net_sl = strategy_metrics["sl_net_pct"]
-        prompt_tp = tp_gross_pct if strategy == "mean_reversion_atr" and tp_gross_pct is not None else tp
-        prompt_sl = sl_gross_pct if strategy == "mean_reversion_atr" and sl_gross_pct is not None else sl
+        is_quant_strategy = strategy != "manual"
+        prompt_tp = tp_gross_pct if is_quant_strategy and tp_gross_pct is not None else tp
+        prompt_sl = sl_gross_pct if is_quant_strategy and sl_gross_pct is not None else sl
         quant_prompt_block = ""
-        if strategy == "mean_reversion_atr" and quant_candidate_eligible and not has_position and engine != "local":
+        expected_sig = strategy_metrics.get("suggested_signal", "COMPRAR")
+        if is_quant_strategy and quant_candidate_eligible and not has_position and engine != "local":
             quant_prompt_block = (
-                "\nMODO AUDITOR CUANTITATIVO: Python ya calculó todas las métricas y habilitó una candidata COMPRAR. "
+                f"\nMODO AUDITOR CUANTITATIVO: Python ya calculó todas las métricas y habilitó una candidata {expected_sig}. "
                 "No recalcules métricas ni inventes datos. Tu única autoridad es vetar (responde MANTENER) si ves una "
                 "contradicción contextual clara, datos/tesis inconsistentes o riesgo excepcional. No puedes autorizar "
-                "una compra si Python no la habilitó ni cambiar las reglas de costos/riesgo. Si no hay motivo concreto "
-                "para vetar, devuelve COMPRAR. Devuelve el JSON del formato solicitado.\n"
+                f"una compra si Python no la habilitó ni cambiar las reglas de costos/riesgo. Si no hay motivo concreto "
+                f"para vetar, devuelve {expected_sig}. Devuelve el JSON del formato solicitado.\n"
                 f"Métricas deterministas: {strategy_metrics}\n"
             )
 
@@ -1232,17 +1249,37 @@ def get_analysis(
         bb_high = latest['bb_high']
         vwap_val = latest['vwap'] if not pd.isna(latest['vwap']) else price_val
 
-        # La estrategia ATR requiere pasar primero todos los filtros deterministas.
+        # La estrategia ATR / Araujo / Chu requiere pasar primero todos los filtros deterministas.
         if strategy == "mean_reversion_atr" and not has_position and not quant_candidate_eligible:
             signal = "MANTENER"
             reason = "Filtro cuantitativo ATR: " + "; ".join(quant_filter_failures)
-        # --- MOTOR 1: LOCAL CUANTITATIVO MATEMÁTICO ---
         elif strategy == "mean_reversion_atr" and not has_position and engine == "local":
             signal = "COMPRAR"
             reason = (
                 f"Candidata cuantitativa válida: Z-Score {z_score:.2f}, EMA200 alcista, "
                 f"absorción {lower_wick_ratio:.2f}, RVOL {relative_volume:.2f}; "
                 f"TP neto estimado +{strategy_net_tp:.3f}% y SL neto {strategy_net_sl:.3f}%."
+            )
+        elif strategy == "nasdaq_araujo_vwap" and not has_position and not quant_candidate_eligible:
+            signal = "MANTENER"
+            reason = "Filtro cuantitativo Araujo (VWAP + M15): " + ("; ".join(quant_filter_failures) if quant_filter_failures else "En espera de confluencia.")
+        elif strategy == "nasdaq_araujo_vwap" and not has_position and engine == "local":
+            signal = expected_sig
+            reason = (
+                f"Gatillo cuantitativo Araujo ({signal}): Sesión {strategy_metrics.get('bias')}, "
+                f"VWAP={strategy_metrics.get('vwap')}, Rango Londres [{strategy_metrics.get('london_low')} - {strategy_metrics.get('london_high')}], "
+                f"Extremos M15 [{strategy_metrics.get('m15_low')} - {strategy_metrics.get('m15_high')}]; "
+                f"TP neto estimado +{strategy_net_tp:.3f}% y SL neto {strategy_net_sl:.3f}%."
+            )
+        elif strategy == "hyenuk_chu_multibagger" and not has_position and not quant_candidate_eligible:
+            signal = "MANTENER"
+            reason = "Filtro cuantitativo Chu (Trend 1h): " + ("; ".join(quant_filter_failures) if quant_filter_failures else "En espera de alineación tendencial.")
+        elif strategy == "hyenuk_chu_multibagger" and not has_position and engine == "local":
+            signal = expected_sig
+            reason = (
+                f"Gatillo cuantitativo Chu Trend ({signal}): Precio ${strategy_metrics.get('current_price')} > SMA20 (${strategy_metrics.get('sma_20')}) "
+                f"> EMA200 (${strategy_metrics.get('ema_200')}), RSI={strategy_metrics.get('rsi')}, RVOL={strategy_metrics.get('relative_volume')}. "
+                f"Hito neto TP +{strategy_net_tp:.2f}% (política Trim) y SL neto {strategy_net_sl:.2f}%."
             )
         elif engine == "local":
             signal, reason = evaluate_local_engine_signal(
@@ -1272,7 +1309,7 @@ def get_analysis(
                     import json
 
                     gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-                    gemini_temp = 0.0 if strategy == "mean_reversion_atr" else 0.2
+                    gemini_temp = 0.0 if is_quant_strategy else 0.2
                     llm = ChatGoogleGenerativeAI(model=gemini_model, google_api_key=api_key, temperature=gemini_temp)
 
 
@@ -1402,7 +1439,7 @@ def get_analysis(
                     [COMPRAR] o [VENDER] o [MANTENER]
                     '''
 
-                    ds_temp = 0.0 if strategy == "mean_reversion_atr" else 0.1
+                    ds_temp = 0.0 if is_quant_strategy else 0.1
                     payload = {
                         "model": "trader-deepseek",
                         "prompt": prompt_text,
@@ -1506,7 +1543,7 @@ def get_analysis(
                         "stream": False,
                         "format": "json"
                     }
-                    if strategy == "mean_reversion_atr":
+                    if is_quant_strategy:
                         payload["options"] = {"temperature": 0.0}
 
                     res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=110)
@@ -1582,7 +1619,7 @@ def get_analysis(
                         "stream": False,
                         "format": "json"
                     }
-                    if strategy == "mean_reversion_atr":
+                    if is_quant_strategy:
                         payload["options"] = {"temperature": 0.0}
                     res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=60)
                     if res.status_code == 404:
@@ -1621,11 +1658,12 @@ def get_analysis(
                 signal = "MANTENER"
                 reason = "Servidor: sin posición abierta, venta ignorada."
         if (
-            strategy == "mean_reversion_atr"
+            is_quant_strategy
             and not has_position
             and quant_candidate_eligible
         ):
-            if signal != "COMPRAR":
+            target_signal = strategy_metrics.get("suggested_signal", "COMPRAR")
+            if signal != target_signal:
                 fail_safe_detail = reason if signal == "ERROR" else "El auditor de IA vetó o no confirmó la candidata cuantitativa."
                 signal = "MANTENER"
                 reason = f"Auditor de IA (Veto / Fail-Safe): {fail_safe_detail}"
@@ -1655,9 +1693,9 @@ def get_analysis(
                 "ema_200": ema_200_value,
                 "ema_200_slope_pct": ema_200_slope_pct,
                 "current_price": current_price_real,
-                "z_score": strategy_metrics["z_score"],
-                "atr_14": strategy_metrics["atr_14"],
-                "relative_volume": strategy_metrics["relative_volume"],
+                "z_score": strategy_metrics.get("z_score"),
+                "atr_14": strategy_metrics.get("atr_14"),
+                "relative_volume": strategy_metrics.get("relative_volume"),
                 "lower_wick_ratio": lower_wick_ratio
             },
             "strategy_metrics": strategy_metrics,

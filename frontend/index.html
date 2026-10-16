@@ -77,6 +77,9 @@
                 </select>
             </div>
             <span id="smartRoutingBadge" class="hidden text-[11px] bg-purple-900/80 text-purple-200 border border-purple-500/80 px-2 py-1 rounded font-mono font-bold animate-pulse shadow-[0_0_10px_rgba(168,85,247,0.4)]">⚡ MODO INTELIGENTE</span>
+            <button id="btnOpenStrategiesModal" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 shadow border border-indigo-400/40 cursor-pointer" title="Abrir Panel y Catálogo de Estrategias">
+                <span>🎯</span> <span class="hidden sm:inline">Estrategias</span>
+            </button>
             <button id="agentToggle" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold transition">
                 Activar Agente
             </button>
@@ -459,12 +462,19 @@
                         </select>
                     </div>
                     <div>
-                        <label for="strategyModeSelect" class="block text-xs text-gray-400 mb-1">Estrategia de trading</label>
+                        <div class="flex justify-between items-center mb-1">
+                            <label for="strategyModeSelect" class="block text-xs text-gray-400">Estrategia de trading</label>
+                            <button type="button" id="btnOpenStrategiesHub" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer">
+                                🎯 Catálogo / Hub
+                            </button>
+                        </div>
                         <select id="strategyModeSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
                             <option value="manual" selected>Manual: TP/SL bruto del desplegable</option>
                             <option value="mean_reversion_atr">Cuantitativa: reversión a la media + ATR (Paper Trading)</option>
+                            <option value="nasdaq_araujo_vwap">Cuantitativa: Nasdaq Araujo (VWAP + M15)</option>
+                            <option value="hyenuk_chu_multibagger">Cuantitativa: Hyenuk Chu (Trend & Multibagger 1h)</option>
                         </select>
-                        <p class="text-[10px] text-gray-500 mt-1">La estrategia ATR calcula TP=2.5×ATR y SL=1.5×ATR; requiere Z≤−2, régimen EMA200, absorción y costos cubiertos. Python filtra primero; la IA seleccionada solo puede vetar.</p>
+                        <p id="strategyDescriptionText" class="text-[10px] text-gray-500 mt-1">La estrategia ATR calcula TP=2.5×ATR y SL=1.5×ATR; requiere Z≤−2, régimen EMA200, absorción y costos cubiertos. Python filtra primero; la IA seleccionada solo puede vetar.</p>
                     </div>
                     <div id="manualTpSlSettings">
                         <label class="block text-xs text-gray-400 mb-1">Movimiento objetivo bruto / Stop Loss (fuente única de TP/SL)</label>
@@ -855,6 +865,34 @@
                 <button onclick="window.sweepBackAll()" class="w-full text-xs bg-red-900 hover:bg-red-800 text-red-200 py-2 rounded border border-red-700 transition">
                     🧹 Sweep-Back (Devolver todo a la Bóveda)
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Hub / Catálogo de Estrategias Cuantitativas -->
+    <div id="strategiesHubModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-gray-800 border border-indigo-500/60 rounded-xl p-6 max-w-4xl w-full max-h-[90vh] flex flex-col shadow-[0_0_30px_rgba(99,102,241,0.3)]">
+            <div class="flex justify-between items-center border-b border-gray-700 pb-3 mb-4">
+                <div class="flex items-center space-x-3">
+                    <span class="text-3xl">🎯</span>
+                    <div>
+                        <h2 class="text-xl font-bold text-white tracking-wide">Panel y Catálogo de Estrategias</h2>
+                        <p class="text-xs text-gray-400">Selecciona o audita los modelos cuantitativos modulares conectados al motor.</p>
+                    </div>
+                </div>
+                <button id="btnCloseStrategiesHub" class="text-gray-400 hover:text-white text-2xl font-bold px-2 py-1 transition">&times;</button>
+            </div>
+            
+            <div id="strategiesHubCardsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pr-1 flex-1 py-1">
+                <!-- Se inyectan dinámicamente las tarjetas de estrategias desde /api/strategies -->
+            </div>
+            
+            <div class="border-t border-gray-700 pt-3 mt-4 flex flex-col sm:flex-row justify-between items-center text-xs text-gray-400 gap-2">
+                <span class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Estrategia Activa: <strong id="activeStrategyBadgeText" class="text-indigo-300 font-mono text-sm ml-1">Manual</strong>
+                </span>
+                <span class="text-[11px] text-gray-400">📁 Carpeta de código: <code class="bg-gray-900 px-1.5 py-0.5 rounded text-indigo-300">backend/estrategias/</code></span>
             </div>
         </div>
     </div>

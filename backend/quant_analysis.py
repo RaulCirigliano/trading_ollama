@@ -140,92 +140,24 @@ def evaluate_strategy_metrics(
     min_profit_pct: float,
     round_trip_cost: float,
     net_tp_manual: float,
+    df: Optional[Any] = None,
 ) -> Tuple[Dict[str, Any], float, bool, List[str], float]:
     """
-    Evalúa los filtros deterministas de la estrategia activa ('manual' o 'mean_reversion_atr')
-    y construye el diccionario `strategy_metrics`.
+    Evalúa los filtros deterministas de la estrategia activa despachando
+    al catálogo modular de backend/estrategias/.
     """
-    latest = ind["latest"]
-    atr_14 = ind["atr_14"]
-    z_score = ind["z_score"]
-    ema_200_value = ind["ema_200_value"]
-    ema_200_slope_pct = ind["ema_200_slope_pct"]
-    lower_wick_ratio = ind["lower_wick_ratio"]
-    relative_volume = ind["relative_volume"]
-
-    if strategy == "mean_reversion_atr":
-        if atr_14 is None or atr_14 <= 0:
-            tp_gross_pct = None
-            sl_gross_pct = None
-            strategy_net_tp = None
-            strategy_net_sl = None
-        else:
-            tp_gross_pct = (ATR_TP_ATR_MULTIPLIER * atr_14 / float(latest["close"])) * 100
-            sl_gross_pct = (ATR_SL_ATR_MULTIPLIER * atr_14 / float(latest["close"])) * 100
-            strategy_net_tp = round(net_return_after_costs(tp_gross_pct, fee, spread), 4)
-            strategy_net_sl = round(net_return_after_costs(-sl_gross_pct, fee, spread), 4)
-
-        minimum_strategy_net_tp = max(ATR_MIN_NET_TP_PCT, min_profit_pct)
-        quant_filter_failures: List[str] = []
-        if z_score is None or z_score > ATR_Z_SCORE_THRESHOLD:
-            quant_filter_failures.append(
-                f"Z-Score no alcanza sobreventa extrema (≤ {ATR_Z_SCORE_THRESHOLD})"
-            )
-        if ema_200_value is None or float(latest["close"]) <= ema_200_value:
-            quant_filter_failures.append("Precio no está por encima de EMA200")
-        if ema_200_slope_pct is None or ema_200_slope_pct < 0:
-            quant_filter_failures.append("Pendiente EMA200 no es positiva")
-        if lower_wick_ratio is None or lower_wick_ratio < ATR_LOWER_WICK_RATIO_MIN:
-            quant_filter_failures.append(
-                f"Mecha inferior de absorción menor a {ATR_LOWER_WICK_RATIO_MIN}"
-            )
-        if relative_volume is None or relative_volume > ATR_RELATIVE_VOLUME_MAX:
-            quant_filter_failures.append(
-                f"Volumen relativo inválido o extremo (> {ATR_RELATIVE_VOLUME_MAX})"
-            )
-        if tp_gross_pct is None or tp_gross_pct < round_trip_cost * ATR_COST_COVERAGE_MULTIPLIER:
-            quant_filter_failures.append(
-                f"Recorrido bruto al TP no cubre {ATR_COST_COVERAGE_MULTIPLIER}x los costos ida/vuelta"
-            )
-        if strategy_net_tp is None or strategy_net_tp < minimum_strategy_net_tp:
-            quant_filter_failures.append(
-                f"TP neto no alcanza el mínimo de {minimum_strategy_net_tp:.3f}%"
-            )
-        quant_candidate_eligible = not quant_filter_failures
-        effective_net_tp = strategy_net_tp if strategy_net_tp is not None else 0.0
-    else:
-        tp_gross_pct = tp
-        sl_gross_pct = sl
-        strategy_net_tp = net_tp_manual
-        strategy_net_sl = round(net_return_after_costs(-sl, fee, spread), 4)
-        quant_filter_failures = []
-        quant_candidate_eligible = False
-        minimum_strategy_net_tp = min_profit_pct
-        effective_net_tp = net_tp_manual
-
-    strategy_metrics = {
-        "mode": strategy,
-        "z_score": round(z_score, 4) if z_score is not None else None,
-        "z_score_threshold": ATR_Z_SCORE_THRESHOLD,
-        "ema_200": round(ema_200_value, 6) if ema_200_value is not None else None,
-        "ema_200_slope_pct": round(ema_200_slope_pct, 6) if ema_200_slope_pct is not None else None,
-        "atr_14": round(atr_14, 8) if atr_14 is not None else None,
-        "relative_volume": round(relative_volume, 4) if relative_volume is not None else None,
-        "lower_wick_ratio": round(lower_wick_ratio, 4) if lower_wick_ratio is not None else None,
-        "tp_gross_pct": round(tp_gross_pct, 6) if tp_gross_pct is not None else None,
-        "sl_gross_pct": round(sl_gross_pct, 6) if sl_gross_pct is not None else None,
-        "tp_net_pct": strategy_net_tp,
-        "sl_net_pct": strategy_net_sl,
-        "minimum_net_tp_pct": round(minimum_strategy_net_tp, 4),
-        "candidate_eligible": quant_candidate_eligible if strategy == "mean_reversion_atr" else None,
-        "filter_failures": quant_filter_failures,
-    }
-    return (
-        strategy_metrics,
-        effective_net_tp,
-        quant_candidate_eligible,
-        quant_filter_failures,
-        minimum_strategy_net_tp,
+    from backend.estrategias.registry import evaluate_strategy
+    return evaluate_strategy(
+        strategy_id=strategy,
+        ind=ind,
+        tp=tp,
+        sl=sl,
+        fee=fee,
+        spread=spread,
+        min_profit_pct=min_profit_pct,
+        round_trip_cost=round_trip_cost,
+        net_tp_manual=net_tp_manual,
+        df=df,
     )
 
 

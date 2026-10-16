@@ -67,6 +67,37 @@ Para que se active la señal de compra en una vela cerrada $i$, deben cumplirse 
 6. **Stop Loss Técnico:**
    $$\text{SL}_{\text{bruto}} = 1.5 \times \frac{\text{ATR14}_i}{\text{Close}_i} \times 100$$
 
+### 3.3. Arquitectura Modular de Estrategias (`backend/estrategias/`)
+Para permitir la incorporación sistemática y ordenada de nuevas estrategias cuantitativas sin alterar el núcleo del motor de trading, se implementó el **Patrón Estrategia**:
+* **Directorio dedicado:** [`backend/estrategias/`](file:///home/raul/Escritorio/proyectos/trading_ollama/backend/estrategias/)
+* **`base.py`:** Define `EstrategiaBase`, la interfaz obligatoria que estandariza los métodos de evaluación, rangos de temporalidad y metadatos de presentación.
+* **`registry.py`:** Descubrimiento y catálogo centralizado de estrategias expuesto mediante el endpoint `GET /api/strategies`.
+* **`mean_reversion_atr.py`:** Módulo independiente que encapsula la reversión a la media institucional ATR del Plan Argon.
+* **`nasdaq_araujo_vwap.py`:** Módulo de la Estrategia Nasdaq Araujo.
+
+### 3.4. Estrategia Nasdaq Araujo (VWAP + M15 + Sesión Londres)
+Basada en la metodología de acción del precio de Franklin Araujo para el índice Nasdaq:
+1. **Activos Idóneos:** `QQQ` (ETF operable), `NQ=F` (Futuros Nasdaq), `MNQ` (Micro Nasdaq).
+2. **Temporalidad Base:** Estrictamente **15 minutos (`15m`)**; llamadas en 1m o 5m son bloqueadas con HTTP 422.
+3. **Hora Clave:** Preparación a las 9:25 AM NY, gatillo al sonar la campana americana (9:30 AM NY).
+4. **Filtro Institucional VWAP:** Evalúa si el precio cotiza por encima (escenario alcista) o por debajo (escenario bajista) del VWAP diario acumulado desde la sesión asiática previa (18:00 NY).
+5. **Filtro de Sesión Londres:** Exige confluencia con el rango de precios desarrollado durante la sesión europea (03:00 - 09:00 NY).
+6. **Gatillo por Quiebre:**
+   * **Compra (Largos):** Precio sobre VWAP + Precio sobre Londres + Ruptura de la resistencia reciente en M15.
+   * **Venta (Cortos):** Precio bajo VWAP + Precio bajo Londres + Ruptura del soporte reciente en M15.
+7. **Gestión de Riesgo y Disciplina:**
+   * **Stop Loss Inmediato:** Colocado detrás del nivel de M15 o del VWAP al momento de entrar.
+   * **1 Solo Trade al Día:** El sistema inhabilita nuevas operaciones en la jornada tras ejecutar el primer trade, protegiendo al operador de la sobreoperación y revancha.
+
+### 3.5. Estrategia Hyenuk Chu (Trend Following & Multibagger / 1h)
+Basada en las lecciones de 20 años de experiencia de Hyenuk Chu:
+1. **Activos Idóneos:** Acciones tecnológicas de crecimiento (`NVDA`, `TSLA`, `AAPL`) y criptoactivos de alta liquidez (`BTC/USDT`, `SOL/USDT`).
+2. **Temporalidad Base:** Estrictamente **1 hora (`1h`)** para operar la tendencia limpia y filtrar el ruido intradiario.
+3. **Alineación Tendencial:** El precio debe cotizar por encima de la SMA20 de corto plazo y de la EMA200 institucional con pendiente alcista activa.
+4. **Filtro Contrario Anti-Euforia:** Bloquea compras si $\text{RSI} > 75$. Chu advierte no comprar en techos de consenso ni perseguir velas eufóricas parabólicas. Exige $\text{RSI} \ge 45$.
+5. **Volumen:** Exige participación institucional ($\text{RVOL} \ge 0.90$).
+6. **Gestión Asimétrica ("Peluquear" / Trim):** Toma parcial de ganancias al alcanzar el hito proyectado (+3.5% o superior) para asegurar el capital base a costo cero, dejando correr el remanente con Trailing Stop para capturar asimetría positiva ilimitada. Stop Loss inflexible mandatorio.
+
 ---
 
 ## 4. Auditoría de Inteligencia Artificial y Fail-Safe
