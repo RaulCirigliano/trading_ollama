@@ -1,0 +1,367 @@
+# Auditoría independiente de arquitectura y operación — AI Trading Agent
+
+Actúa como auditor independiente de arquitectura, lógica de trading algorítmico, calidad de software y operación del proyecto.
+
+## Principio de independencia
+
+Realiza una investigación nueva, directamente sobre el código y el estado actual del repositorio. No tomes como evidencia ni como punto de partida las conclusiones de conversaciones, auditorías, agentes o informes anteriores. No des por correctas ni por incorrectas recomendaciones o arreglos previos: confirma cada comportamiento siguiendo el código activo y, cuando sea seguro, con pruebas reproducibles.
+
+No limites la revisión a un conjunto de cambios, un commit o una intervención específica. Inspecciona el estado actual completo del proyecto. Revisa el estado Git para identificar cambios locales y distinguir:
+- código activo;
+- documentación y planes;
+- pruebas;
+- scripts e integraciones;
+- componentes externos no disponibles para inspección.
+
+La documentación, los nombres de los agentes, los comentarios y los informes son afirmaciones que debes contrastar; no sustituyen la evidencia del flujo ejecutable. Si el comportamiento no se puede demostrar, indícalo expresamente.
+
+## 1. Contexto y límites
+
+Repositorio a inspeccionar:
+
+    /home/raul/Escritorio/proyectos/trading_ollama
+
+El proyecto recibe datos de mercado reales. Comprueba en el código si las órdenes, saldos y posiciones actuales son simulados o reales. El objetivo futuro del usuario es integrar un broker para operar con capital depositado, pero no asumas que esa integración ya existe.
+
+Distingue siempre entre:
+- datos de mercado reales y operaciones reales;
+- saldos, transferencias o posiciones virtuales y fondos reales;
+- reglas documentadas y reglas conectadas al flujo activo;
+- un agente asesor, un motor que produce señales y un componente que modifica la cartera;
+- el motor de análisis elegido y el modo de ejecución del dashboard;
+- confianza declarada por un agente y una probabilidad estadística validada;
+- un control visual y un control que efectivamente cambia el comportamiento.
+
+Establece al principio del informe cuál es el estado operativo demostrado por el código. No repitas esa aclaración en cada apartado si no aporta información nueva.
+
+Si un componente reside en otro repositorio, servicio o agente y no está disponible para inspección, describe únicamente lo comprobable desde este proyecto. No inventes sus prompts, ciclos, datos ni capacidades internas.
+
+## 2. Condiciones de trabajo
+
+Esta tarea es de análisis, no de implementación.
+
+- No edites ni crees archivos.
+- No instales dependencias.
+- No hagas commit ni push.
+- No ejecutes órdenes, operaciones financieras ni transferencias.
+- No llames brokers ni uses credenciales.
+- No llames servicios de IA, feeds o mercados que puedan generar cargos o alterar estado.
+- Puedes ejecutar inspecciones estáticas y pruebas locales que sean seguras y no dependan de servicios externos.
+- Antes de ejecutar pruebas, inspecciona qué hacen. No ejecutes pruebas que consulten directamente mercados, noticias, brokers, servicios de IA o sistemas con credenciales.
+- Si una prueba no se puede ejecutar sin instalar paquetes o acceder a un servicio, informa la limitación; no la fuerces.
+
+Conserva todos los cambios locales existentes. No restaures archivos ni limpies el árbol de trabajo.
+
+## 3. Preguntas que debe responder la investigación
+
+Determina con evidencia:
+
+1. Qué agentes, motores, servicios, rutinas, tareas periódicas y procesos existen realmente.
+2. Qué datos recibe cada uno, de qué fuente y con qué frecuencia.
+3. Qué instrucciones, prompts, reglas deterministas, filtros, límites y formatos de salida usa.
+4. Qué puede hacer cada componente por sí solo y qué ocurre al combinarlo con otros.
+5. Qué controles reales tiene el operador en el dashboard y cuál es su efecto efectivo.
+6. Qué decisiones y guardas se ejecutan en el backend y cuáles dependen del frontend/navegador.
+7. Qué fallos reproducibles afectan Paper Trading, análisis desatendido, riesgo o futura integración con broker.
+8. Qué diferencias hay entre comportamiento implementado, documentación, pruebas y expectativa visible para el operador.
+9. Qué se necesitaría implementar y validar antes de integrar dinero real.
+
+No presupongas que los agentes votan, colaboran todos a la vez o están activos por defecto. Demuestra cada flujo mediante referencias al código.
+
+## 4. Componentes que debes verificar
+
+Usa esta lista como hipótesis, no como inventario confirmado:
+
+- Orquestador/Cerebro principal.
+- Motor matemático o cuantitativo local.
+- Motores seleccionables Qwen, Ollama base, DeepSeek y Gemini.
+- Agente de Sentimiento/NLP.
+- Agente de Inversiones y Radar Macro; fuentes nativa, Monitor e híbrida.
+- Monitor del Mercado satélite.
+- Antigravity CIO y su skill/script de integración.
+- Cerebro o rutina Pre-Market.
+- Agente de Riesgo: Stop Loss, Take Profit, breakeven, trailing y circuit breaker.
+- Modo fijo y Modo Inteligente/Multi-Activo.
+- Modo Copiloto y modo Autónomo.
+- Selectores, switches, botones, timers, listeners, tareas de fondo y cualquier otro trabajador que encuentres.
+
+Para cada componente confirma:
+- si existe;
+- el nombre real en interfaz y código;
+- dónde se ejecuta;
+- cómo se activa;
+- si opera solo o necesita otro componente;
+- qué estado modifica;
+- si corre en segundo plano;
+- qué ocurre cuando se apaga o falla;
+- qué no se puede determinar por falta de código externo.
+
+## 5. Inspección de la interfaz del operador
+
+Inspecciona todos los controles relacionados con análisis, ejecución, riesgo, macro, sentimiento, horario, activos, capital, agentes y Pre-Market.
+
+Incluye como mínimo:
+- motor de análisis;
+- modo fijo/inteligente;
+- modo Copiloto/Autónomo;
+- fuente macro;
+- fuente de noticias;
+- switch de sentimiento;
+- switches de agentes;
+- activo y timeframe;
+- comisión, spread estimado, TP/SL y riesgo;
+- horario;
+- billeteras, bóveda y asignaciones;
+- iniciar/detener el agente;
+- aprobar/rechazar señales;
+- aplicar/copiar directivas;
+- cierre de emergencia;
+- controles y cancelación de Pre-Market.
+
+Para cada control indica:
+- texto visible e identificador HTML;
+- estado/valor predeterminado;
+- listener que recibe los cambios;
+- funciones y estado que consumen ese valor;
+- efecto real sobre solicitudes, decisiones u operaciones;
+- si se aplica inmediatamente o en el siguiente ciclo;
+- qué ocurre si cambia durante una petición, con una posición abierta o con una señal pendiente;
+- si es funcional, parcial, redundante, decorativo o potencialmente engañoso;
+- qué otros controles sincroniza;
+- cómo puede confirmar el operador que el cambio surtió efecto.
+
+No concluyas que un switch funciona porque aparece activado en HTML. Sigue su estado hasta el código que produce el comportamiento.
+
+## 6. Rastreo de flujos completos
+
+### A. Monitor/CIO → señal → operación
+
+Sigue la ruta completa:
+
+    fuente original
+    → validación
+    → endpoint/script de recepción
+    → buzón o estado activo
+    → polling del dashboard
+    → filtro y posible auto-ruteo
+    → contexto macro
+    → motor de análisis
+    → señal
+    → guardas
+    → modo de ejecución
+    → modificación de cartera simulada
+    → historial
+
+Aclara si el CIO recibe velas, indicadores, noticias, operaciones anteriores o solamente informes/tesis. Distingue lo manual de lo automático. Comprueba si una directiva puede producir una compra por sí sola o solo orientar contexto/ruteo.
+
+### B. Motor matemático
+
+Sigue:
+
+    OHLCV
+    → validación y frescura
+    → indicadores
+    → reglas de entrada/salida
+    → filtros de costos
+    → señal
+    → guardas posteriores
+    → simulador
+
+Registra literalmente las reglas y su orden de precedencia. Indica si la decisión depende de sentimiento, tesis macro, Pre-Market o confianza del Monitor, o si esos datos solo se usan en otros motores.
+
+### C. Motores LLM
+
+Para cada motor disponible por separado, identifica:
+
+- instrucciones y fragmentos literales relevantes del prompt;
+- mercado, velas, indicadores, posición y precios recibidos;
+- sentimiento y contexto macro incluidos o excluidos;
+- formato de salida requerido;
+- parsing, normalización y manejo de respuestas inesperadas;
+- timeout, errores y resultado ante salida inválida;
+- guardas posteriores en backend y frontend;
+- diferencias demostrables entre motores;
+- si los motores se ejecutan en paralelo, en secuencia o son alternativas seleccionables.
+
+No copies prompts completos repetidos sin necesidad; sí señala contradicciones entre ellos.
+
+### D. Sentimiento y Radar
+
+Comprueba:
+- cuándo y con qué frecuencia consultan fuentes externas;
+- cómo seleccionan, puntúan y agregan titulares;
+- cómo llega el resultado a cada motor;
+- qué efecto efectivo tiene el puntaje en las señales;
+- diferencia entre Radar nativo, Monitor e híbrido;
+- si apagar el switch detiene consultas, limpia resultados y/o evita que datos anteriores sigan influyendo.
+
+### E. Pre-Market
+
+Sigue activación, motor seleccionado, fuentes/datos, prompt, formato y parsing, persistencia, cancelación y conexión posterior con selección de activo y análisis ordinario.
+
+Determina si campos como `autorizar_operacion` son informativos o si pueden habilitar una operación, directa o indirectamente.
+
+### F. Riesgo y gestión de posición
+
+Rastrea:
+- fuente del precio y activo usado;
+- frecuencia de evaluación;
+- controles de frescura y mercado cerrado;
+- PnL neto y tarifas utilizadas;
+- Stop Loss, Take Profit, breakeven y trailing;
+- circuit breaker y cooldown;
+- cierre de posición y manejo de errores;
+- persistencia del estado;
+- comportamiento al cerrar pestaña/navegador, detener el agente analítico, cambiar el activo/configuración o perder el feed.
+
+Separa el monitor de riesgo del agente que genera señales. Identifica qué protecciones dependen de que el dashboard siga abierto y cuáles ejecuta el backend.
+
+### G. Precios, tarifas, riesgo y contabilidad
+
+Determina primero, a partir del flujo de código, si TP/SL representan movimiento bruto del precio, rendimiento neto o alguna otra magnitud. Después comprueba cómo se usan en:
+- backend;
+- prompts;
+- interfaz;
+- fills simulados;
+- PnL;
+- trailing y stops;
+- logs e historial.
+
+Rastrea tasas por orden, ida/vuelta, spread, slippage, precio de referencia, precio de ejecución, inversión, cantidades, comisiones, PnL y transferencias JIT/Sweep-Back. Enumera solo discrepancias demostrables, incluyendo diferencias de unidades o conversiones de moneda.
+
+## 7. Matriz de funcionamiento individual y combinado
+
+Completa la tabla según el comportamiento ejecutable, no según nombres o documentación:
+
+| Configuración | ¿Quién analiza? | ¿Qué datos/contexto recibe? | ¿Quién genera la señal? | ¿Puede funcionar sola? | ¿Qué controla el operador? | Efecto de apagar el componente |
+|---|---|---|---|---|---|---|
+
+Incluye como mínimo:
+
+- solo modelo matemático;
+- solo Qwen;
+- solo Ollama base;
+- solo DeepSeek;
+- solo Gemini;
+- solo Radar/Agente de Inversiones;
+- solo Monitor/CIO;
+- solo Sentimiento;
+- solo Pre-Market;
+- solo Riesgo con posición abierta;
+- macro + modelo matemático;
+- macro + Qwen;
+- Monitor + Qwen;
+- Monitor + modelo matemático;
+- sentimiento + modelo matemático;
+- sentimiento + Qwen;
+- CIO/Monitor + ejecución Autónoma;
+- CIO/Monitor + Copiloto;
+- Modo Fijo y Modo Inteligente;
+- cualquier combinación adicional que el código permita, aunque la interfaz la presente de otra manera.
+
+“Solo” debe aclarar exactamente qué pasa con los demás componentes: apagados, seleccionados pero no llamados, ejecutándose en segundo plano o todavía influyentes por estado/directivas previas.
+
+## 8. Hipótesis que debes verificar, no aceptar automáticamente
+
+Para cada punto indica: confirmada, parcialmente confirmada, refutada o no comprobable, con evidencia y consecuencia práctica.
+
+1. Los motores matemático, Qwen, Ollama, DeepSeek y Gemini podrían ser alternativas, no motores que votan juntos.
+2. El CIO podría auditar/injectar tesis, sin recibir velas continuamente ni mantener un ciclo de trading autónomo.
+3. La directiva macro podría enrutar activo y servir como contexto para LLM, pero no participar en las señales matemáticas.
+4. Algunos switches podrían no estar conectados plenamente al comportamiento que promete la interfaz.
+5. El monitor de riesgo podría depender del dashboard abierto.
+6. El motor matemático podría analizar repetidamente una vela cerrada y emitir logs redundantes.
+7. Las comisiones podrían ser manuales/seleccionables, y no tarifas consultadas al broker; spread o slippage podrían ser estimados o estar ausentes en algunos caminos.
+8. Podrían existir diferencias entre TP neto/bruto, cálculo de comisión y umbral de viabilidad.
+9. Una respuesta tardía después de detener/cambiar el agente podría llegar a procesarse.
+10. La confianza macro podría no estar calibrada como probabilidad empírica.
+11. Broker real, bóveda en backend, ledger y reconciliación podrían ser diseño futuro, no flujo activo.
+
+Busca tanto confirmaciones como evidencia que contradiga cada hipótesis.
+
+## 9. Estado Git, pruebas y observaciones
+
+- Inspecciona el estado Git antes de evaluar y distingue cambios locales sin asumir quién los hizo.
+- Examina el código de las pruebas antes de ejecutarlas.
+- Ejecuta únicamente validaciones pertinentes, seguras y sin servicios externos.
+- Informa comandos, resultados, advertencias y limitaciones.
+- Separa claramente “pruebas pasan” de “estrategia rentable” o “sistema seguro”.
+
+Evalúa los logs/observaciones proporcionados solo como evidencia de esas sesiones:
+- una sesión nocturna de Qwen que habría terminado empatada;
+- una observación matemática de +0,68% y cierres previos cercanos a +1,5%;
+- ciclos repetidos de MANTENER con una posición y valores de indicadores aparentemente constantes.
+
+No infieras causalidad ni superioridad a partir de una o pocas sesiones. Determina si los valores son PnL flotante o realizado, duración de posiciones, número de operaciones, costes aplicados y condiciones de mercado. Si falta evidencia, dilo.
+
+Propón un protocolo justo de comparación:
+- mismo activo y timeframe;
+- mismos datos, período, saldo, comisión, spread, TP/SL y reglas de ejecución;
+- carteras simuladas independientes para cada motor;
+- métricas netas cerradas, drawdown, número de operaciones, exposición, costes y duración;
+- períodos separados de ajuste y validación;
+- resultados separados por clase de activo y horario.
+
+No extrapoles BTC/cripto a acciones, índices o mercado argentino.
+
+## 10. Formato del informe
+
+Responde en español. Para cada hallazgo técnico incluye ID, prioridad, estado de certeza, archivo y línea(s), ruta ejecutable, causa, impacto, forma segura de reproducirlo/probarlo y recomendación mínima.
+
+Usa referencias verificables de archivo y líneas. Separa:
+
+1. fallos que afectan hoy a Paper Trading;
+2. riesgos de análisis/operación desatendida;
+3. requisitos necesarios solo para el futuro broker real;
+4. mejoras documentales o de experiencia del operador.
+
+Entrega el informe con esta estructura:
+
+### 1. Veredicto ejecutivo
+Qué es el sistema hoy, quién produce señales, papel de cada grupo y recomendación: conservar/mejorar, reestructurar parcialmente o empezar de nuevo. Justifica con evidencia.
+
+### 2. Arquitectura real de agentes
+Diagrama textual desde fuentes de mercado y macro hasta una operación simulada. Distingue agentes, motores alternativos, servicios externos, reglas deterministas, modos y ejecutor.
+
+### 3. Directivas verificadas por componente
+Función real, instrucciones/prompts, reglas, datos, activación y salida. Señala qué solo está documentado o reside en otro sistema.
+
+### 4. Controles del operador
+Tabla exhaustiva con el efecto real de cada control y su estado funcional.
+
+### 5. Matriz de funcionamiento individual y combinado
+Completa la matriz exigida en la sección 7.
+
+### 6. Hallazgos priorizados
+Ordena por crítico/alto/medio/bajo. No infles severidades ni cuentes varias veces el mismo defecto con nombres distintos.
+
+### 7. Evaluación de rendimiento
+Qué sugieren y qué no prueban los datos disponibles; incluye el protocolo experimental propuesto.
+
+### 8. Plan de mejora por fases
+Orden implementable, objetivos, módulos, dependencias, pruebas de aceptación y criterios de finalización. Evalúa como mínimo:
+
+- Fase 0: mapa verificable de agentes, estados y controles.
+- Fase 1: respuestas obsoletas, cancelación, carreras y concurrencia.
+- Fase 2: política uniforme de directivas y expiración.
+- Fase 3: semántica efectiva de switches y telemetría visible.
+- Fase 4: deduplicación de señales/ciclos y reducción de llamadas/logs redundantes.
+- Fase 5: semántica unificada de TP/SL, tarifas, spread y slippage.
+- Fase 6: pruebas unitarias y de integración de combinaciones y estados.
+- Fase 7: comparación estadística de motores por mercado.
+- Fase futura independiente: broker real, autoridad backend, tesorería, idempotencia, ledger, reconciliación, límites y protecciones nativas del broker.
+
+Reordena las fases si la evidencia exige otro orden. No implementes ninguna.
+
+### 9. Pruebas
+Comandos, resultados, cobertura y limitaciones.
+
+### 10. Decisiones de negocio pendientes
+Incluye solo decisiones que no puedan deducirse del código: significado deseado de TP/SL, autoridad macro, expiración, semántica de controles y reglas por mercado. Formula preguntas concretas sin asumir las respuestas.
+
+### 11. Riesgo residual y condiciones previas a broker real
+Distingue controles efectivamente existentes de requisitos no implementados o no validados para Live Trading.
+
+El informe debe responder con suficiente profundidad a los once apartados solicitados. No reduzcas hallazgos, recorridos, controles ni combinaciones para hacer la respuesta breve. Incluye evidencia y referencias concretas para las conclusiones; si algún comportamiento no puede verificarse, explica qué falta y por qué.
+
+Al final, añade un resumen ejecutivo breve con las tres mejoras que deberían abordarse primero y el motivo de su prioridad. Ese resumen complementa el informe: no sustituye, repite ni limita el análisis detallado.

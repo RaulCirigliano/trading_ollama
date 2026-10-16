@@ -1,0 +1,20 @@
+Hay 9 archivos .md en el proyecto. Se dividen así:
+
+Instrucciones para agentes o modelos
+GEMINI.md: reglas generales para el asistente que trabaja en el proyecto —arquitectura, seguridad, documentación y Git—. No es la guía de trading de Gemini dentro de la aplicación.
+SKILL.md del CIO: define el rol de Antigravity CIO, cómo audita informes y cómo envía directivas macro al puente del proyecto.
+Guías para configurar los cerebros locales de Ollama
+OLLAMA_TRADER_SETUP.md: explica cómo instalar y configurar los modelos locales. Es una guía de instalación, no las instrucciones que el modelo carga al operar.
+Las instrucciones que Ollama sí carga están en los tres archivos llamados Modelfile —no son .md—:
+Modelfile: Llama 3.
+Modelfile-deepseek: DeepSeek.
+Modelfile-qwen: Qwen.
+Documentación del proyecto y material para auditorías
+README.md: presentación, funcionalidades e instalación del proyecto.
+CONTEXTO.md: arquitectura, estado y reglas técnicas del sistema.
+Tres_Verdades_Contraintuitivas_del_Mercado.md: documento de principios de trading; por sí solo no se carga automáticamente en todos los cerebros.
+CLAUDE_AUDITOR_PROMPT.md: prompt para pedir una auditoría externa.
+CLAUDE_SONNET_AUDITOR_PROMPT.md: prompt de auditoría para Claude Sonnet.
+CLAUDE_SONNET_CONTRA_REVISION_PROMPT.md: prompt para que Claude revise cambios ya aplicados.
+SORA_AUDITOR_PROMPT.md: prompt para solicitar auditoría a Sora.
+En concreto: para cambiar las directivas permanentes de DeepSeek o Qwen locales, se editan sus Modelfile y se reconstruye el modelo. Para cambiar las directivas del CIO de Antigravity, se modifica su SKILL.md. Los prompts de auditoría son documentos para copiar/usar con auditores; no guían las decisiones de trading en ejecución.

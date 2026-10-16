@@ -6,20 +6,34 @@ Permite auditar el buzón del Monitor del Mercado o inyectar directamente una te
 
 import sys
 import json
+import os
 import urllib.request
 import urllib.error
 
 API_BASE = "http://127.0.0.1:18767"
 
+def auth_headers(extra=None):
+    headers = {"User-Agent": "Antigravity-CIO/1.0"}
+    if extra:
+        headers.update(extra)
+    token = (
+        os.getenv("TRADING_OLLAMA_API_TOKEN")
+        or os.getenv("APP_SECRET_TOKEN")
+        or os.getenv("APP_TOKEN")
+    )
+    if token:
+        headers["X-API-Token"] = token
+    return headers
+
 def get_monitor_reports():
     url = f"{API_BASE}/api/macro/radar?source=monitor"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Antigravity-CIO/1.0"})
+        req = urllib.request.Request(url, headers=auth_headers())
         with urllib.request.urlopen(req, timeout=5) as response:
             return json.loads(response.read().decode())
     except Exception as e:
         print(f"⚠️ Error consultando buzón de Monitor del Mercado: {e}")
-        return []
+        return None
 
 def inject_directive(asset: str, text: str, confidence: int = 85, signal_type: str = "Oportunidad"):
     url = f"{API_BASE}/api/macro/inject"
@@ -31,7 +45,7 @@ def inject_directive(asset: str, text: str, confidence: int = 85, signal_type: s
         "source": "Antigravity CIO"
     }
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "Antigravity-CIO/1.0"})
+    req = urllib.request.Request(url, data=data, headers=auth_headers({"Content-Type": "application/json"}))
     try:
         with urllib.request.urlopen(req, timeout=5) as response:
             res_data = json.loads(response.read().decode())
@@ -48,11 +62,14 @@ def main():
         asset = sys.argv[1]
         text = sys.argv[2]
         conf = int(sys.argv[3]) if len(sys.argv) > 3 else 85
-        inject_directive(asset, text, conf)
+        if inject_directive(asset, text, conf) is None:
+            sys.exit(1)
         return
 
     print("🔍 Consultando informes recientes de Monitor del Mercado...")
     reports = get_monitor_reports()
+    if reports is None:
+        sys.exit(1)
     if not reports or reports[0].get("asset") == "MONITOR_ESPERA":
         print("ℹ️ No hay informes pendientes en el Monitor del Mercado.")
         print("💡 Uso manual: python3 audit_and_inject.py <ACTIVO> <TESIS> [CONFIANZA]")

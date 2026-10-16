@@ -3,7 +3,7 @@ import os
 import re
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -13,6 +13,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUZON_FILE = os.path.join(PROJECT_ROOT, "buzon_radar.json")
 
 _PROCESS_CLEANED_PATHS = set()
+
+def parse_iso_timestamp(timestamp: str) -> datetime:
+    normalized = f"{timestamp[:-1]}+00:00" if timestamp.endswith("Z") else timestamp
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed.astimezone(timezone.utc)
 
 class OpportunityCard(BaseModel):
     id: str
@@ -96,14 +103,14 @@ class RadarInbox:
             return
         with _LOCK:
             existing = self.read_all_cards()
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             cutoff_6h = now - timedelta(hours=6)
 
             # Construir conjunto de deduplicación reciente (últimas 6h)
             recent_seen = set()
             for c in existing:
                 try:
-                    ts = datetime.fromisoformat(c.timestamp)
+                    ts = parse_iso_timestamp(c.timestamp)
                     if ts >= cutoff_6h:
                         recent_seen.add((c.activo.upper().strip(), self._normalize_title(c.titular)))
                 except Exception:
@@ -134,12 +141,12 @@ class RadarInbox:
         with _LOCK:
             cards = self.read_all_cards()
             active_cards = []
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             ttl_delta = timedelta(hours=hours_ttl)
 
             for card in cards:
                 try:
-                    card_time = datetime.fromisoformat(card.timestamp)
+                    card_time = parse_iso_timestamp(card.timestamp)
                     if now - card_time <= ttl_delta:
                         active_cards.append(card)
                 except Exception:

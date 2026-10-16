@@ -1,0 +1,154 @@
+Actúa como ingeniero de software senior, auditor de seguridad de aplicaciones financieras y responsable de calidad. Audita este repositorio de extremo a extremo y corrige únicamente defectos reales que puedas demostrar.
+
+## Contexto que debes verificar, no asumir
+
+El proyecto se presenta como una aplicación de análisis de mercado, dashboard y simulación de operaciones. Comprueba en el código qué hace realmente: si solo simula operaciones, si consulta datos públicos, si persiste saldos localmente o si existe alguna integración capaz de acceder a cuentas, mover fondos o enviar órdenes a brokers/exchanges.
+
+No confundas funcionalidades planificadas con funcionalidades implementadas. No describas una operación como “simulada” o “real” sin verificar el flujo de datos y las llamadas de red involucradas.
+
+El objetivo futuro puede incluir manejo de dinero real. Por eso, además de auditar el comportamiento actual, evalúa los riesgos de una eventual transición, pero no implementes ni habilites operaciones financieras reales como parte de esta tarea.
+
+## Prioridad máxima: seguridad del capital
+
+Trata cualquier funcionalidad que pueda afectar dinero, saldos, posiciones, claves o instrucciones a brokers como crítica. Revisa especialmente:
+
+1. **Separación entre simulación y dinero real**
+   - Verifica que el modo paper no pueda conectarse accidentalmente a un broker ni reutilizar credenciales reales.
+   - Busca rutas, flags, variables de entorno, adaptadores, jobs, listeners y llamadas indirectas que puedan enviar órdenes.
+   - Comprueba que un fallo del modelo, del frontend o de la configuración no pueda activar operaciones reales por defecto.
+   - Si existe integración real o no puedes descartar que exista, no la ejecutes: documenta el flujo estáticamente y usa mocks.
+
+2. **Arquitectura de fondos para un futuro modo real**
+   - Evalúa si se aplica el diseño de Cuentas Ómnibus: la Bóveda/Tesorería Central mantiene los fondos y las billeteras operativas empiezan en cero.
+   - El capital debe asignarse Just-In-Time, limitado al monto exacto autorizado para una operación.
+   - Al cerrar una posición, el capital y el resultado neto deben volver a la Bóveda mediante Sweep-Back.
+   - No recomendar ni introducir acceso irrestricto del bot a todos los fondos de un exchange.
+   - Si el sistema actual no implementa este flujo, indícalo explícitamente como requisito pendiente, no como una vulnerabilidad ya explotable.
+
+3. **Integridad financiera y controles**
+   - Comprueba cálculos de cantidad, precio, precisión, moneda, saldo disponible, exposición, comisiones, spread, slippage, PnL realizado/no realizado y redondeos.
+   - La rentabilidad proyectada debe descontar comisiones ida y vuelta y spread antes de permitir una entrada.
+   - Busca dobles ejecuciones, reintentos no idempotentes, carreras, saldos negativos, órdenes duplicadas, posiciones huérfanas, fills parciales, desconexiones y estados inconsistentes.
+   - Verifica límites de exposición y que las validaciones críticas ocurran en el backend, no solo en la interfaz o en la respuesta de un LLM.
+   - Para una eventual operativa real, analiza reconciliación con el broker, ledger de doble partida, auditoría inmutable, circuit breakers, límites por operación/día, kill switch y recuperación segura tras reinicios.
+
+4. **Credenciales y datos sensibles**
+   - Revisa `.env`, claves de API, tokens, logs, CSV/JSON/SQLite, backups, historial Git y mensajes de error.
+   - Nunca imprimas ni incluyas valores de secretos en el informe.
+   - Comprueba permisos de archivos, exposición al frontend, almacenamiento en localStorage, rotación y validación de credenciales.
+   - No envíes claves ni datos privados a servicios externos durante la auditoría.
+
+5. **API, red y dashboard**
+   - Revisa autenticación/autorización, CORS, Trusted Host, exposición de puertos, CSRF, SSRF, XSS, inyección, traversal, acceso a archivos, límites de tamaño y frecuencia.
+   - Comprueba si las rutas administrativas y las que modifican estado exigen autorización en el servidor.
+   - Examina el vínculo con servicios locales o proyectos externos sin invocarlos si pueden manejar trading, credenciales o fondos.
+   - Valida entradas no confiables de RSS, yfinance, Ollama/Gemini y del navegador antes de persistirlas, mostrarlas o incorporarlas a prompts.
+
+## Método de trabajo obligatorio
+
+1. Inspecciona primero estructura, documentación, dependencias, historial y estado de Git. Conserva todos los cambios preexistentes; nunca los reviertas ni los sobrescribas.
+2. Ejecuta primero las pruebas existentes y registra fielmente qué pasó. Si un test puede conectarse a un mercado, broker, servicio con cargos o sistema externo, no lo ejecutes directamente: inspecciónalo y sustitúyelo por un mock o una prueba local segura.
+3. Sigue el flujo real desde los lanzadores hasta el backend, la persistencia, los servicios externos y el frontend. Busca discrepancias entre documentación y comportamiento.
+4. Prioriza defectos demostrables. Para cada hallazgo, registra evidencia concreta: archivo y función, causa raíz, impacto, condiciones de explotación/reproducción y prueba.
+5. Implementa reparaciones puntuales para los problemas demostrados que sean seguras y estén dentro del alcance. Añade pruebas de regresión.
+6. No habilites, pruebes ni envíes órdenes reales. No contactes endpoints de broker/exchange con credenciales ni realices acciones que muevan dinero o generen cargos. Usa mocks para todas las rutas potencialmente financieras.
+7. No hagas cambios amplios de arquitectura ni implementes el paso a Live Trading como parte de la auditoría. Si el diseño requerido para operar con dinero real todavía no existe, informa qué barreras hacen falta y deténte antes de habilitarlo.
+8. No hagas commits ni pushes. No borres datos del usuario, no limpies archivos existentes y no expongas secretos.
+9. Ejecuta después las pruebas pertinentes, compilación, tipos y linters disponibles. Si una comprobación depende de Internet, credenciales, Windows o servicios ausentes, indícalo y usa una alternativa local segura cuando sea posible.
+10. Inspecciona el diff final y confirma que no incluye datos generados, secretos ni cambios ajenos a la tarea.
+
+## Clasificación de severidad
+
+- **Crítico:** posibilidad demostrable de pérdida o transferencia no autorizada de fondos, exposición de credenciales con capacidad de operar, bypass de controles financieros o ejecución real accidental.
+- **Alto:** acceso no autorizado a funciones financieras, modificación de saldos/posiciones, órdenes repetibles o explotables, exposición grave de datos o vulnerabilidad que pueda escalar a pérdida de fondos.
+- **Medio:** fallos que degradan controles, exactitud financiera, disponibilidad o privacidad, con impacto/explotación más limitados.
+- **Bajo:** defectos de impacto limitado, inconsistencias o riesgos principalmente operativos/documentales.
+
+No eleves la severidad solo porque la aplicación trate temas financieros. Diferencia impacto potencial de capacidad real de explotación en el código actual.
+
+## Informe final requerido
+
+Responde en español y presenta:
+
+1. **Resumen ejecutivo**, dejando claro si el sistema actual es solo simulación o tiene capacidad real de operar.
+2. **Hallazgos ordenados por severidad**, con: ID, severidad, archivo/función, evidencia, impacto, reproducibilidad, reparación aplicada o motivo para no repararlo y confianza.
+3. **Matriz de estado** para los controles de dinero real: implementado, parcial, ausente o no aplicable. Incluye Bóveda/Cuentas Ómnibus, Just-In-Time Funding, Sweep-Back, comisiones y spread, límites, idempotencia, ledger, reconciliación, kill switch y separación paper/live.
+4. **Cambios realizados** y archivos afectados.
+5. **Pruebas y comandos ejecutados**, incluyendo resultados iniciales y finales.
+6. **Verificaciones bloqueadas** o no realizadas y la causa.
+7. **Riesgo residual y condiciones obligatorias antes de habilitar dinero real.**
+8. **Lista de validaciones manuales pendientes.**
+
+No afirmes que el proyecto está “libre de errores”. Distingue hechos comprobados, inferencias y requisitos futuros.
+
+resultado
+
+1. Resumen ejecutivo
+El código revisado implementa análisis y Paper Trading, no operativa con dinero real. El dashboard conserva saldos virtuales en localStorage; el backend consulta datos públicos y persiste el historial simulado en CSV. No encontré llamadas para crear órdenes ni credenciales de broker conectadas al flujo. ccxt se usa para datos públicos, y el adaptador de paper trading no está conectado al API activo.
+
+Sí hay funciones virtuales de Bóveda, JIT y Sweep-Back, pero viven en el navegador: no son transferencias reales ni una base segura para habilitar Live Trading.
+
+En esta pasada reparé validaciones de costos, datos externos y registros, el acceso al puente macro, el renderizado XSS y los lanzadores. No habilité brokers ni contacté RSS, cotizaciones, Ollama o Gemini.
+
+La revisión delegada independiente no reportó hallazgos adicionales:
+
+#	Severity	File	Lines	Vulnerability	Confidence
+—	—	—	—	Sin hallazgos accionables reportados por la revisión independiente	—
+2. Hallazgos y reparaciones
+ID	Severidad	Evidencia e impacto	Reparación	Confianza
+F-01	🔴 Alto	El radar insertaba el texto no confiable de noticias/modelos en atributos onclick; un valor manipulado podía escapar del literal JavaScript y ejecutar código en el dashboard.	Eliminé los manejadores inline y conecté eventos mediante listeners del DOM en app.js. Revisado estáticamente; no hice una prueba de navegador con payload.	9/10
+F-02	🟡 Medio	La interfaz exigía un margen mínimo sobre comisiones, pero el backend aceptaba TP inferiores para llamadas directas y podía continuar el análisis como viable.	Alineé el filtro del servidor con el de la interfaz y acoté TP, SL, riesgo, sentimiento, comisión y precio de entrada en main.py. Hay prueba con TP=1.5%, fee 0.5%, que ahora devuelve MANTENER sin consultar el mercado.	10/10
+F-03	🟡 Medio	Datos upstream con NaN, infinito, precios no positivos o velas OHLC incoherentes podían contaminar el análisis o producir fallos al serializar respuestas.	Valido velas y precios antes de cachearlos en main.py. Los tests mockeados confirman respuestas HTTP 502 para datos inválidos.	9/10
+F-04	🟡 Medio	La ruta de registro aceptaba valores financieros negativos/no finitos y respondía HTTP 200 ante fallos de escritura, pese a no haber persistido el trade.	Añadí validación de campos y respuesta HTTP 500 explícita ante error de almacenamiento en main.py. Probé rechazo de valores inválidos, fallo de escritura y persistencia válida en un CSV temporal.	10/10
+F-05	🟡 Medio	El puente macro aceptaba payloads sin esquema estricto ni verificación de acceso; fechas no válidas podían fallar y contaminar la priorización.	Añadí esquema, límites de campos, timestamp ISO validado y control local/token a las rutas del puente en main.py. Se prueba acceso rechazado sin autorización y aceptado con token.	9/10
+F-06	🟡 Medio	Fechas con zona horaria podían descartarse o provocar comparaciones inválidas; además, se seleccionaba una alerta del buzón sin resolver correctamente el parser/fecha.	Normalicé timestamps ISO, incluidos los terminados en Z, y reparé la prioridad entre alerta e inyección manual en radar_inbox.py y main.py.	9/10
+F-07	🟡 Medio	La purga de Ollama podía liberar un OLLAMA_LOCK perteneciente a otra inferencia.	La purga ya no libera locks ajenos; cada operación lo libera en su propio finally en main.py. Prueba con lock adquirido confirma que permanece bloqueado.	10/10
+F-08	⚪ Bajo	Los lanzadores usaban una ruta absoluta del equipo y terminaban procesos por nombre o puerto, con riesgo de afectar otras aplicaciones.	Ahora usan la raíz del proyecto, detectan puertos ocupados y manejan los procesos iniciados por el lanzador Linux en lanzar_bot.sh y lanzar_bot.bat.	10/10
+También corregí la ausencia de la anotación Optional en premarket_digest.py, normalicé respuestas Gemini de objeto a lista y evité que el radar genere conclusiones si no recibió titulares RSS válidos.
+
+3. Matriz de controles para dinero real
+Control	Estado actual	Evaluación
+Bóveda / Cuentas Ómnibus	Parcial, solo simulación	Hay una bóveda virtual en navegador; no representa custodia ni saldo de broker. La billetera inicial virtual de USDT tampoco debe reutilizarse como saldo real.
+Just-In-Time Funding	Parcial, solo simulación	Existe código de asignación virtual en el frontend; no hay transferencias reales ni backend autoritativo.
+Sweep-Back	Parcial, solo simulación	El cierre simulado devuelve valores a la bóveda virtual; no hay barrido en un broker.
+Comisiones	Parcial	El simulador descuenta fees y el backend aplica un filtro de viabilidad. No encontré cálculo de spread/slippage en el umbral.
+Límites de exposición	Parcial	Hay límites de la simulación y guardas en el análisis; el selector permite incluso 100% del capital virtual. No hay límites de órdenes reales.
+Idempotencia	Parcial	Hay deduplicación de velas y mutex en el cliente, pero no existe API de órdenes ni idempotencia para operaciones de broker.
+Ledger de doble partida	Ausente	Saldos en localStorage e historial CSV; no vi ledger contable autoritativo e inmutable.
+Reconciliación con broker	Ausente	No existe conector activo para reconciliar fills, órdenes o saldos reales.
+Kill switch	Parcial	Puede detener el agente y cancelar/purgar Ollama; no puede cerrar una posición real porque no hay broker conectado.
+Separación paper/live	No aplicable hoy / pendiente para Live	No encontré ruta de ejecución real, pero tampoco un modo Live implementado que tenga una barrera formal de habilitación. No debe añadirse reutilizando el estado del simulador.
+4. Cambios realizados
+Los cambios abarcan main.py, radar_inbox.py, premarket_digest.py, app.js, index.html, ambos lanzadores, dependencias y documentación.
+
+Separé dependencias base, Gemini opcional y pruebas en requirements.txt, requirements-gemini.txt y requirements-dev.txt. Actualicé README.md, CONTEXTO.md y backend/.env.example para aclarar que Gemini transmite prompts a un servicio externo y que los saldos son virtuales.
+
+Las pruebas añadidas están en test_regressions.py.
+
+5. Pruebas y verificaciones
+Inicio de esta pasada: venv/bin/python -m pytest -q tests/test_regressions.py → 17 passed.
+Final: mismo comando → 24 passed.
+git diff --check → correcto.
+bash -n lanzar_bot.sh → correcto.
+venv/bin/python -m compileall -q backend tests → correcto.
+venv/bin/python -m pip check → sin dependencias rotas.
+node --check frontend/js/app.js → correcto.
+Se verificó que backend y digest importan sin paquetes Gemini instalados; en una pasada anterior se instaló la base en un entorno virtual temporal limpio y también importó correctamente.
+Se ejecutó scripts/check_dom_ids.py; reporta IDs usados pero no escritos literalmente en el HTML. La inspección confirmó que corresponden a elementos generados dinámicamente o referencias opcionales con fallback.
+El escaneo de patrones de secretos sobre el diff no encontró valores sospechosos.
+6. Verificaciones bloqueadas o no realizadas
+No ejecuté tests/test_api.py, tests/test_main.py ni test_radar.py: sus scripts consultan directamente Binance/Yahoo/RSS. No hice esas llamadas; los casos relevantes se cubrieron con mocks.
+No contacté Ollama, Gemini, RSS, Yahoo, Binance ni brokers. Gemini requiere credenciales y puede consumir cuota o tener cargos.
+No pude probar el arranque real de los dos servidores: el puerto 18087 ya estaba ocupado en una verificación previa y no quise detener ni interferir con el proceso existente.
+No ejecuté lanzar_bot.bat en Windows; solo fue revisado estáticamente. La prueba de XSS se verificó por inspección del código y sintaxis, no en navegador.
+7. Riesgos residuales
+La wallet virtual y sus reglas viven en localStorage, que el usuario puede modificar; no es una fuente confiable de saldos para dinero real.
+Las reglas JIT/Sweep-Back son simuladas. Antes de Live se requiere implementar la bóveda y movimientos en backend, límites independientes del LLM/UI, autorizaciones explícitas, idempotencia, reconciliación y ledger auditable.
+El simulador contabiliza fees, pero no spread/slippage; el resultado virtual puede sobreestimar la rentabilidad.
+Binance/Yahoo/RSS son dependencias externas para datos; al seleccionar Gemini, el prompt sale del equipo hacia Google. La modalidad Ollama mantiene la inferencia local.
+No se añadió ni probó ninguna vía de ejecución real.
+8. Validaciones manuales pendientes
+En una máquina/entorno controlado, probar ambos lanzadores con puertos libres y ocupados, y confirmar inicio, mensaje de error y cierre de sus propios procesos.
+Verificar manualmente en un navegador el flujo del token opcional, el radar, el copiado/aplicación de alertas y los permisos CORS.
+Si se desea Live Trading en el futuro, exigir antes una revisión separada de arquitectura y pruebas en sandbox oficial; no utilizar cuentas ni credenciales reales durante esa fase.
+No hice commits ni pushes. Dejé intactos los archivos preexistentes sin seguimiento auditoria_1_vs.txt y auditoria_2_vs.txt; no forman parte de mis cambios.

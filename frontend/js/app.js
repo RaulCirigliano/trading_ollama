@@ -1,6 +1,13 @@
 const API_BASE_URL = (window.location.protocol && window.location.hostname)
     ? `${window.location.protocol}//${window.location.hostname}:18767`
     : 'http://127.0.0.1:18767';
+const tradingGuards = window.TradingGuards;
+
+function apiAuthHeaders(headers = {}) {
+    const token = sessionStorage.getItem('ai_app_token');
+    return token ? { ...headers, 'X-API-Token': token } : headers;
+}
+
 // Elementos de UI
 const terminal = document.getElementById('terminal');
 const agentToggle = document.getElementById('agentToggle');
@@ -237,6 +244,9 @@ let portfolio = JSON.parse(localStorage.getItem('ai_portfolio_v5')) || {
 };
 
 function getCurrency(symbol) {
+    if (tradingGuards && typeof tradingGuards.getCurrency === 'function') {
+        return tradingGuards.getCurrency(symbol);
+    }
     if (!symbol) return 'USD';
     if (symbol.includes('USDT')) return 'USDT';
     if (symbol.includes('.BA')) return 'ARS';
@@ -350,37 +360,9 @@ function resolveSymbol(candAsset) {
 
 // Detección de sesiones bursátiles y horarios de mercado activos
 function isAssetMarketOpen(symbol) {
-    if (!symbol) return true;
-    // Criptomonedas: abiertas 24/7/365
-    if (symbol.includes('/')) return true;
-
-    const now = new Date();
-    const utcDay = now.getUTCDay(); // 0 = Domingo, 6 = Sábado
-    const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-
-    // Fin de semana: Wall Street y Merval completamente inactivos
-    if (utcDay === 0 || utcDay === 6) {
-        // Futuros de materias primas (GC=F, CL=F, etc.) abren domingo a las 22:00 UTC (18:00 EDT)
-        if (symbol.includes('=F') && utcDay === 0 && utcMinutes >= 22 * 60) return true;
-        return false;
+    if (tradingGuards && typeof tradingGuards.isAssetMarketOpenAt === 'function') {
+        return tradingGuards.isAssetMarketOpenAt(symbol, new Date());
     }
-
-    // Mercado Local Argentino (.BA): 11:00 a 17:00 ARG (14:00 a 20:00 UTC)
-    if (symbol.includes('.BA')) {
-        return (utcMinutes >= 14 * 60 && utcMinutes < 20 * 60);
-    }
-
-    // Wall Street regular (SPY, QQQ, AAPL, TLT, etc.): 13:30 a 20:00 UTC (09:30 a 16:00 EDT)
-    // Con ventana pre/after market ampliada hasta 21:00 UTC
-    if (!symbol.includes('=F')) {
-        return (utcMinutes >= 13 * 60 + 30 && utcMinutes < 20 * 60);
-    }
-
-    // Futuros de materias primas y energía (=F): 24h Lu-Vi con descanso técnico 21:00 - 22:00 UTC
-    if (symbol.includes('=F')) {
-        return !(utcMinutes >= 21 * 60 && utcMinutes < 22 * 60);
-    }
-
     return true;
 }
 
@@ -407,12 +389,13 @@ function hasOpenPosition() {
 
 // Matemática unificada de PnL y salida neta (R1)
 function netPctAtPrice(pos, price, feeRate) {
-    if (!pos || !Number.isFinite(price) || price <= 0) return 0;
-    const effectiveFeeRate = (pos && typeof pos.feeRate === 'number') ? pos.feeRate : (feeRate !== undefined ? feeRate : getBrokerFeeRate());
-    const costBasis = pos.costBasis || (pos.qty * pos.entryPrice);
-    if (!costBasis || costBasis <= 0) return 0;
-    const netExitValue = pos.qty * price * (1 - (effectiveFeeRate / 100));
-    return ((netExitValue - costBasis) / costBasis) * 100;
+    const effectiveFeeRate = (pos && typeof pos.feeRate === 'number')
+        ? pos.feeRate
+        : (feeRate !== undefined ? feeRate : getBrokerFeeRate());
+    if (tradingGuards && typeof tradingGuards.netPctAtPrice === 'function') {
+        return tradingGuards.netPctAtPrice(pos, price, effectiveFeeRate);
+    }
+    return 0;
 }
 
 // Tests puros de consola para verificación matemática de riesgo (R1 item 6)
@@ -495,6 +478,7 @@ if (initialOpenPos && initialOpenPos.symbol) {
 window.positionAssetPrice = null;
 window.positionAssetPriceTs = 0;
 let riskTickInFlight = false;
+let manualCloseInFlight = false;
 let riskFeedFailures = 0;
 let staleFeedStartTime = 0; // ms: inicio de periodo estancado con mercado abierto
 let lastMarketClosedLoggedSymbol = ''; // Símbolo para registrar una sola vez aviso de mercado cerrado
@@ -520,6 +504,7 @@ async function riskTick() {
 
     try {
         const res = await fetch(`${API_BASE_URL}/api/market/price?symbol=${encodeURIComponent(pos.symbol)}`, {
+            headers: apiAuthHeaders(),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -595,7 +580,19 @@ async function riskTick() {
 
         const evalPrice = window.positionAssetPrice;
         const feeRate = (pos && typeof pos.feeRate === 'number') ? pos.feeRate : getBrokerFeeRate();
+        if (!Number.isFinite(feeRate) || feeRate < 0 || feeRate > 10) {
+            logToTerminal(`🛑 [RIESGO] Evaluación de salida pausada: comisión inválida para ${pos.symbol}. Corrige la configuración antes de operar.`, 'error');
+            return;
+        }
+        if (Number.isFinite(pos.spreadRate) && (pos.spreadRate < 0 || pos.spreadRate > 5)) {
+            logToTerminal(`🛑 [RIESGO] Evaluación de salida pausada: spread guardado inválido para ${pos.symbol}.`, 'error');
+            return;
+        }
         const pnlNetPct = netPctAtPrice(pos, evalPrice, feeRate);
+        if (!Number.isFinite(pnlNetPct)) {
+            logToTerminal(`🛑 [RIESGO] Evaluación de salida pausada: no se pudo calcular el PnL neto de ${pos.symbol}.`, 'error');
+            return;
+        }
 
         if (typeof pos.peakPrice !== 'number' || pos.peakPrice <= 0) pos.peakPrice = pos.entryPrice;
         if (typeof pos.stopNetPct !== 'number') pos.stopNetPct = -(pos.slEffPct ?? pos.sl ?? 1.0);
@@ -616,7 +613,17 @@ async function riskTick() {
         }
 
         // 2. Trailing Stop
-        const takeProfitLimit = pos.tp !== undefined ? pos.tp : 1.5;
+        const configuredTakeProfit = pos.tp !== undefined ? pos.tp : 1.5;
+        const minimumNetProfit = Number.isFinite(pos.minProfitPct)
+            ? pos.minProfitPct
+            : getMinimumNetProfitPct();
+        const minimumNetProfitIsValid = Number.isFinite(minimumNetProfit)
+            && minimumNetProfit >= 0
+            && minimumNetProfit <= 5;
+        if (!minimumNetProfitIsValid) {
+            logToTerminal(`⚠️ [RIESGO] Toma de ganancias bloqueada: umbral de beneficio neto inválido para ${pos.symbol}. Los stops de protección siguen activos.`, 'error');
+        }
+        const takeProfitLimit = Math.max(configuredTakeProfit, minimumNetProfitIsValid ? minimumNetProfit : 0);
         if (pnlNetPct >= (takeProfitLimit * 0.6)) {
             pos.trailActive = true;
             const trailPrice = pos.peakPrice * (1 - (pos.trailPct / 100));
@@ -648,10 +655,10 @@ async function riskTick() {
                 exitReason = 'Trailing';
             }
             logToTerminal(`⚠️ AGENTE DE RIESGO: ${exitReason} disparado en ${pos.symbol} (${pnlNetPct.toFixed(2)}% neto vs umbral ${pos.stopNetPct >= 0 ? '+' : ''}${pos.stopNetPct.toFixed(2)}% neto). Vendiendo para proteger capital.`, 'error');
-            executeTrade('VENDER', pos.symbol, pos.baseCoin, evalPrice, exitReason);
-        } else if (pnlNetPct >= takeProfitLimit) {
+            executeTrade('VENDER', pos.symbol, pos.baseCoin, evalPrice, exitReason, { verifiedQuote: true });
+        } else if (minimumNetProfitIsValid && pnlNetPct >= takeProfitLimit) {
             logToTerminal(`🎯 AGENTE DE RIESGO: Take Profit alcanzado en ${pos.symbol} (+${pnlNetPct.toFixed(2)}% neto vs +${takeProfitLimit}% objetivo). Asegurando ganancias.`, 'action');
-            executeTrade('VENDER', pos.symbol, pos.baseCoin, evalPrice, 'Take Profit');
+            executeTrade('VENDER', pos.symbol, pos.baseCoin, evalPrice, 'Take Profit', { verifiedQuote: true });
         }
 
     } catch (err) {
@@ -836,18 +843,122 @@ function getBrokerFeeRate() {
     if (feeSelect.value === 'custom') {
         const customInput = document.getElementById('customFeeInput');
         const val = parseFloat(customInput?.value);
-        return isNaN(val) ? 0.10 : Math.max(0, val);
+        return Number.isFinite(val) && val >= 0 && val <= 10 ? val : NaN;
     }
-    return parseFloat(feeSelect.value) || 0;
+    const rate = parseFloat(feeSelect.value);
+    return Number.isFinite(rate) && rate >= 0 && rate <= 10 ? rate : NaN;
+}
+
+function getEstimatedSpreadRate() {
+    const spreadInput = document.getElementById('spreadInput');
+    const rate = parseFloat(spreadInput?.value ?? '0.05');
+    return Number.isFinite(rate) && rate >= 0 && rate <= 5 ? rate : NaN;
+}
+
+function getMinimumNetProfitPct() {
+    const input = document.getElementById('minProfitPctInput');
+    const rate = parseFloat(input?.value ?? '0.15');
+    return Number.isFinite(rate) && rate >= 0 && rate <= 5 ? rate : NaN;
+}
+
+function getStrategyMode() {
+    const mode = document.getElementById('strategyModeSelect')?.value || 'manual';
+    return mode === 'mean_reversion_atr' ? mode : 'manual';
+}
+
+function getQuantRiskBudgetPct() {
+    const rate = parseFloat(document.getElementById('quantRiskBudgetSelect')?.value ?? '0.25');
+    return Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate / 100 : NaN;
+}
+
+function updateStrategySettingsVisibility() {
+    const quantMode = getStrategyMode() === 'mean_reversion_atr';
+    document.getElementById('manualTpSlSettings')?.classList.toggle('hidden', quantMode);
+    document.getElementById('quantRiskBudgetSettings')?.classList.toggle('hidden', !quantMode);
 }
 
 function updateBrokerFeeDisplay() {
     const rate = getBrokerFeeRate();
+    const spread = getEstimatedSpreadRate();
     const badge = document.getElementById('roundTripBadge');
     if (badge) {
-        badge.innerText = `Round-Trip: ${(rate * 2).toFixed(2)}%`;
+        badge.innerText = Number.isFinite(rate) && Number.isFinite(spread)
+            ? `Costos ida/vuelta: ${((rate + spread) * 2).toFixed(2)}%`
+            : 'Costo inválido';
     }
 }
+
+const spreadInput = document.getElementById('spreadInput');
+const savedSpreadRaw = localStorage.getItem('ai_spread_estimate_v1');
+const savedSpread = Number(savedSpreadRaw);
+if (spreadInput && savedSpreadRaw !== null && Number.isFinite(savedSpread) && savedSpread >= 0 && savedSpread <= 5) {
+    spreadInput.value = String(savedSpread);
+}
+spreadInput?.addEventListener('input', () => {
+    localStorage.setItem('ai_spread_estimate_v1', spreadInput.value);
+    updateBrokerFeeDisplay();
+});
+
+const minProfitPctInput = document.getElementById('minProfitPctInput');
+const savedMinimumNetProfitRaw = localStorage.getItem('ai_minimum_net_profit_v1');
+const savedMinimumNetProfit = Number(savedMinimumNetProfitRaw);
+if (
+    minProfitPctInput
+    && savedMinimumNetProfitRaw !== null
+    && Number.isFinite(savedMinimumNetProfit)
+    && savedMinimumNetProfit >= 0
+    && savedMinimumNetProfit <= 5
+) {
+    minProfitPctInput.value = String(savedMinimumNetProfit);
+}
+minProfitPctInput?.addEventListener('change', () => {
+    const minimumNetProfit = getMinimumNetProfitPct();
+    if (!Number.isFinite(minimumNetProfit)) {
+        logToTerminal('⚠️ Beneficio neto mínimo inválido; usa un valor entre 0 y 5%.', 'error');
+        return;
+    }
+    localStorage.setItem('ai_minimum_net_profit_v1', String(minimumNetProfit));
+    logToTerminal(`🎯 Beneficio neto mínimo para toma de ganancias: ${minimumNetProfit.toFixed(2)}%. Se aplicará a las próximas posiciones.`, 'info');
+});
+
+const strategyModeSelect = document.getElementById('strategyModeSelect');
+const savedStrategyMode = localStorage.getItem('ai_strategy_mode_v1');
+if (strategyModeSelect && ['manual', 'mean_reversion_atr'].includes(savedStrategyMode)) {
+    strategyModeSelect.value = savedStrategyMode;
+}
+strategyModeSelect?.addEventListener('change', () => {
+    localStorage.setItem('ai_strategy_mode_v1', getStrategyMode());
+    updateStrategySettingsVisibility();
+    if (getStrategyMode() === 'mean_reversion_atr') {
+        const tfSelect = document.getElementById('timeframeSelect');
+        if (tfSelect && !tradingGuards.isAllowedAtrTimeframe(tfSelect.value)) {
+            tfSelect.value = '15m';
+            logToTerminal('ℹ️ La estrategia ATR requiere temporalidad de 15m o 1h. Ajustando automáticamente a 15m.', 'info');
+        }
+    }
+    logToTerminal(
+        getStrategyMode() === 'mean_reversion_atr'
+            ? '🧮 Estrategia cuantitativa ATR seleccionada para las próximas posiciones simuladas.'
+            : '⚙️ Estrategia manual seleccionada: TP/SL del desplegable.',
+        'info'
+    );
+});
+updateStrategySettingsVisibility();
+
+
+const quantRiskBudgetSelect = document.getElementById('quantRiskBudgetSelect');
+const savedQuantRiskBudget = Number(localStorage.getItem('ai_quant_risk_budget_v1'));
+if (quantRiskBudgetSelect && [0.25, 0.5, 1].includes(savedQuantRiskBudget)) {
+    quantRiskBudgetSelect.value = String(savedQuantRiskBudget);
+}
+quantRiskBudgetSelect?.addEventListener('change', () => {
+    const budget = getQuantRiskBudgetPct();
+    if (!Number.isFinite(budget)) {
+        logToTerminal('⚠️ Presupuesto de riesgo inválido; selecciona un valor mayor que 0 y hasta 1%.', 'error');
+        return;
+    }
+    localStorage.setItem('ai_quant_risk_budget_v1', quantRiskBudgetSelect.value);
+});
 
 let tradeHistoryLog = JSON.parse(localStorage.getItem('ai_trade_history_v2')) || [];
 if (!Array.isArray(tradeHistoryLog)) tradeHistoryLog = [];
@@ -1186,7 +1297,9 @@ async function fetchMarketData() {
     const reqSymbol = currentSymbol;
     try {
         logToTerminal(`Conectando al motor Python para obtener velas de ${reqSymbol}...`, 'info');
-        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${encodeURIComponent(reqSymbol)}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`);
+        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${encodeURIComponent(reqSymbol)}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}`, {
+            headers: apiAuthHeaders()
+        });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
         const data = await response.json();
@@ -1240,8 +1353,9 @@ function updateChartHeaderTitles() {
     const titleTf = document.getElementById('chartTitleTf');
     if (titleTf) {
         const tfVal = document.getElementById('timeframeSelect')?.value || '1m';
-        const tfLabels = { '1m': '1 Minuto', '5m': '5 Minutos', '15m': '15 Minutos' };
+        const tfLabels = { '1m': '1 Minuto', '5m': '5 Minutos', '15m': '15 Minutos', '1h': '1 Hora' };
         titleTf.innerText = tfLabels[tfVal] || tfVal;
+
     }
 }
 
@@ -1259,6 +1373,8 @@ let copilotState = 'idle'; // 'idle' | 'awaiting'
 let simulateInterval = null;
 let cycleInFlight = false; // Mutex para evitar análisis concurrentes en vuelo
 let cycleStartedAt = 0; // Timestamp de inicio para watchdog
+let activeAnalysisController = null;
+let analysisAbortReason = null;
 let isExecutingTrade = false; // Mutex para evitar ejecuciones concurrentes de órdenes
 let lastHandledCandle = { symbol: '', candleTs: 0 };
 let copilotExpiryTimer = null;
@@ -1399,6 +1515,10 @@ function stopAgent(reason = 'user', { copilotPause = false } = {}) {
         clearTimeout(simulateInterval);
         simulateInterval = null;
     }
+    if (activeAnalysisController && !activeAnalysisController.signal.aborted) {
+        analysisAbortReason = reason === 'circuit_breaker' ? 'circuit_breaker' : 'stopped';
+        activeAnalysisController.abort();
+    }
 
     if (copilotPause) {
         copilotState = 'awaiting';
@@ -1438,6 +1558,37 @@ agentToggle.addEventListener('click', () => {
     }
 });
 
+async function fetchFreshExecutionQuote(symbol, parentSignal = null) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const abortFromParent = () => controller.abort();
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+    const timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, 5000);
+    try {
+        const response = await fetch(
+            `${API_BASE_URL}/api/market/price?symbol=${encodeURIComponent(symbol)}`,
+            { headers: apiAuthHeaders(), signal: controller.signal }
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status} al consultar precio de ejecución.`);
+        const quote = await response.json();
+        if (!tradingGuards.isFreshQuote(quote)) {
+            throw new Error(`Cotización no ejecutable: mercado cerrado o dato vencido (${quote.quote_age_s ?? 'N/A'}s; umbral ${quote.stale_threshold_s ?? 'N/A'}s).`);
+        }
+        return Number(quote.price);
+    } catch (err) {
+        if (timedOut && !parentSignal?.aborted) {
+            throw new Error('Timeout de 5 segundos consultando el precio de ejecución.');
+        }
+        throw err;
+    } finally {
+        clearTimeout(timeoutId);
+        parentSignal?.removeEventListener('abort', abortFromParent);
+    }
+}
+
 const ejecutarAnalisis = async () => {
     if (!isAgentActive) return;
 
@@ -1450,11 +1601,14 @@ const ejecutarAnalisis = async () => {
         return;
     }
 
-    // 2. Watchdog: liberación de mutex si quedó colgado más de 130s (Bloque 4 item 5)
+    // 2. Watchdog: cancelar el análisis activo si supera los 130 segundos.
     const nowMs = Date.now();
     if (cycleInFlight && (nowMs - cycleStartedAt > 130000)) {
-        logToTerminal('⚠️ [WATCHDOG] Ciclo de análisis previo excedió tiempo límite. Liberando mutex.', 'warn');
-        cycleInFlight = false;
+        logToTerminal('⚠️ [WATCHDOG] Ciclo de análisis excedió el tiempo límite. Cancelando la petición activa sin liberar el mutex antes de que termine.', 'warn');
+        if (activeAnalysisController && !activeAnalysisController.signal.aborted) {
+            analysisAbortReason = 'watchdog';
+            activeAnalysisController.abort();
+        }
     }
 
     if (cycleInFlight) {
@@ -1467,6 +1621,7 @@ const ejecutarAnalisis = async () => {
     cycleStartedAt = nowMs;
     let rescheduled = false;
     let timeoutId = null;
+    let controller = null;
 
     const engine = document.getElementById('engineSelect')?.value || 'local';
     try {
@@ -1510,17 +1665,17 @@ const ejecutarAnalisis = async () => {
             if (openPos.symbol !== currentSymbol) {
                 logToTerminal(`ℹ️ Posición activa en ${openPos.symbol}. Priorizando análisis para salida en cartera en lugar de ${currentSymbol}.`, 'info');
             }
-        } else if (isSmartMode() && window.currentInjectedMacro && window.currentInjectedMacro.asset) {
-            const candAsset = String(window.currentInjectedMacro.asset).trim();
-            let matchedSymbol = null;
-            if (symbolSelect) {
-                for (const opt of symbolSelect.options) {
-                    if (opt.value === candAsset || opt.value.split('/')[0] === candAsset || candAsset.includes(opt.value)) {
-                        matchedSymbol = opt.value;
-                        break;
-                    }
-                }
+        } else if (isSmartMode() && window.currentInjectedMacro) {
+            const directive = window.currentInjectedMacro;
+            if (!tradingGuards.isEligibleMacroDirective(directive)) {
+                window.currentInjectedMacro = null;
+                const macroBox = document.getElementById('macroContext');
+                if (macroBox && lastAutoInjectedText && macroBox.value === lastAutoInjectedText) macroBox.value = '';
+                lastAutoInjectedText = null;
             }
+            const matchedSymbol = window.currentInjectedMacro && symbolSelect
+                ? tradingGuards.matchDirectiveSymbol(directive.asset, Array.from(symbolSelect.options, option => option.value))
+                : null;
             if (matchedSymbol) {
                 const candCur = getCurrency(matchedSymbol);
                 const hasCapital = (portfolio.balances[candCur] >= 5 || portfolio.VAULT >= 5);
@@ -1533,9 +1688,12 @@ const ejecutarAnalisis = async () => {
                             symbolSelect.value = matchedSymbol;
                             symbolSelect.dispatchEvent(new Event('change'));
                         }
-                        if (window.currentInjectedMacro.text) {
+                        if (directive.text) {
                             const macroBox = document.getElementById('macroContext');
-                            if (macroBox) macroBox.value = window.currentInjectedMacro.text;
+                            if (macroBox) {
+                                macroBox.value = directive.text;
+                                lastAutoInjectedText = directive.text;
+                            }
                         }
                     }
                 } else {
@@ -1550,11 +1708,35 @@ const ejecutarAnalisis = async () => {
         const tpVal = Math.abs(parseFloat(tpStr)) || 1.5;
         const slVal = Math.abs(parseFloat(slStr)) || 1.0;
         const feeRate = getBrokerFeeRate();
-        const roundTripFee = feeRate * 2.0;
+        const spreadRate = getEstimatedSpreadRate();
+        const strategyMode = hasPosition && openPos.strategyMode
+            ? openPos.strategyMode
+            : getStrategyMode();
+        const minProfitPct = hasPosition && Number.isFinite(openPos.minProfitPct)
+            ? openPos.minProfitPct
+            : getMinimumNetProfitPct();
+        if (!Number.isFinite(feeRate)) {
+            logToTerminal('⚠️ [FILTRO VIABILIDAD] La comisión configurada no es válida (rango 0–10%).', 'warn');
+            return;
+        }
+        if (!Number.isFinite(minProfitPct) || minProfitPct < 0 || minProfitPct > 5) {
+            logToTerminal('⚠️ [FILTRO VIABILIDAD] El beneficio neto mínimo no es válido (rango 0–5%).', 'warn');
+            return;
+        }
+        const netTp = tradingGuards.netReturnAfterCosts(tpVal, feeRate, spreadRate);
 
-        // R9: Filtro de viabilidad matemática: tp >= 2 * roundTripFee
-        if (tpVal < (2 * roundTripFee)) {
-            logToTerminal(`⚠️ [FILTRO VIABILIDAD] Take Profit neto (+${tpVal}%) es inferior al doble de comisiones (${(2 * roundTripFee).toFixed(2)}%). Aumenta el TP o reduce fees.`, 'warn');
+        if (strategyMode === 'mean_reversion_atr' && !tradingGuards.isAllowedAtrTimeframe(tf)) {
+            logToTerminal(`⚠️ [FILTRO ATR] La estrategia cuantitativa ATR solo admite temporalidades de 15m o 1h (actual: ${tf}). Cambia la temporalidad o la estrategia.`, 'warn');
+            return;
+        }
+
+        if (
+            !Number.isFinite(spreadRate)
+            || (strategyMode === 'manual' && !Number.isFinite(netTp))
+            || (!hasPosition && strategyMode === 'manual' && netTp < minProfitPct)
+        ) {
+
+            logToTerminal(`⚠️ [FILTRO VIABILIDAD] Ganancia neta estimada del TP (+${Number.isFinite(netTp) ? netTp.toFixed(3) : 'inválida'}%) no alcanza el margen neto mínimo (${minProfitPct.toFixed(3)}%). Revisa comisión, spread y TP.`, 'warn');
             return;
         }
 
@@ -1572,15 +1754,20 @@ const ejecutarAnalisis = async () => {
         }
 
         const sentScore = window.currentSentimentScore || 0;
-        const url = `${API_BASE_URL}/api/market/analysis?symbol=${encodeURIComponent(targetSymbol)}&timeframe=${tf}&engine=${engine}&tp=${tpVal}&sl=${slVal}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}&fee=${feeRate}&has_position=${hasPosition}&entry_price=${entryPrice}`;
+        const url = `${API_BASE_URL}/api/market/analysis?symbol=${encodeURIComponent(targetSymbol)}&timeframe=${tf}&engine=${engine}&strategy=${strategyMode}&tp=${tpVal}&sl=${slVal}&risk=${riskVal}&sentiment=${sentScore}&macro=${encodeURIComponent(macroContextText)}&fee=${feeRate}&spread=${spreadRate}&min_profit_pct=${minProfitPct}&has_position=${hasPosition}&entry_price=${entryPrice}`;
         
         // Timeout que cubre cuerpo y conexión (Bloque 4 item 5)
         const timeoutMs = (engine === 'deepseek' || engine === 'ollama') ? 120000 : 45000;
-        const controller = new AbortController();
-        timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        controller = new AbortController();
+        activeAnalysisController = controller;
+        analysisAbortReason = null;
+        timeoutId = setTimeout(() => {
+            analysisAbortReason = 'timeout';
+            controller.abort();
+        }, timeoutMs);
 
         logToTerminal(`Consultando Orquestador (${targetSymbol}) vía ${engine.toUpperCase()}...`, 'info');
-        const response = await fetch(url, { signal: controller.signal });
+        const response = await fetch(url, { headers: apiAuthHeaders(), signal: controller.signal });
 
         // R6: Validación HTTP antes de leer datos
         if (!response.ok) {
@@ -1592,6 +1779,7 @@ const ejecutarAnalisis = async () => {
         clearTimeout(timeoutId);
         timeoutId = null;
 
+        if (!isAgentActive || controller.signal.aborted) return;
         if (typeof data?.signal !== 'string') {
             throw new Error('Respuesta inválida: falta propiedad signal de tipo string.');
         }
@@ -1603,15 +1791,20 @@ const ejecutarAnalisis = async () => {
             return;
         }
 
-        const feeStr = data.fee_info ? ` | Fee Broker: ${data.fee_info.round_trip_fee}% ida/vuelta` : '';
+        const feeStr = data.fee_info
+            ? ` | Comisión RT: ${data.fee_info.round_trip_fee}% | Spread est. RT: ${data.fee_info.round_trip_spread}% | TP neto est.: +${data.fee_info.net_tp}% | Mínimo neto: ${data.fee_info.min_profit_pct ?? minProfitPct}%`
+            : '';
+        const strategyMetrics = data.strategy_metrics;
+        const strategyStr = strategyMetrics?.mode === 'mean_reversion_atr'
+            ? ` | Z: ${strategyMetrics.z_score ?? 'N/A'} | ATR14: ${strategyMetrics.atr_14 ?? 'N/A'} | RVOL: ${strategyMetrics.relative_volume ?? 'N/A'} | Mecha: ${strategyMetrics.lower_wick_ratio ?? 'N/A'} | TP/SL bruto: +${strategyMetrics.tp_gross_pct ?? 'N/A'}%/-${strategyMetrics.sl_gross_pct ?? 'N/A'}%`
+            : '';
         const rsiDisp = data.indicators?.rsi !== undefined && data.indicators?.rsi !== null ? data.indicators.rsi : '-';
         const smaDisp = data.indicators?.sma_20 !== undefined && data.indicators?.sma_20 !== null ? data.indicators.sma_20 : '-';
         const logType = data.signal === 'COMPRAR' ? 'action' : (data.signal === 'VENDER' ? 'error' : 'info');
-        logToTerminal(`[${data.signal}] RSI: ${rsiDisp} | SMA20: ${smaDisp}${feeStr}`, 'warn');
+        logToTerminal(`[${data.signal}] RSI: ${rsiDisp} | SMA20: ${smaDisp}${feeStr}${strategyStr}`, 'warn');
         logToTerminal(`Razonamiento: ${data.reason}`, logType);
 
         const baseCoin = targetSymbol.split('/')[0];
-        const executionMode = document.getElementById('executionModeSelect')?.value || 'copilot';
 
         const isBuyable = data.signal === 'COMPRAR' && !hasPosition;
         const isSellable = data.signal === 'VENDER' && hasPosition;
@@ -1632,52 +1825,70 @@ const ejecutarAnalisis = async () => {
         }
 
         if (isBuyable || isSellable) {
-            let execPrice = 0;
-            if (isBuyable) {
-                // Validación estricta de precio para compras:
-                // Prioridad 1: Precio verificado de la vela recibido del backend para targetSymbol
-                if (data.indicators && typeof data.indicators.current_price === 'number' && data.indicators.current_price > 0) {
-                    execPrice = data.indicators.current_price;
-                } else if (currentPriceSymbol === targetSymbol && currentPrice > 0) {
-                    execPrice = currentPrice;
-                } else {
-                    logToTerminal(`⚠️ [SEGURIDAD] Compra abortada: sin precio verificado para ${targetSymbol} (sincronizando activo).`, 'error');
-                    if (signalCandleTs > 0) lastHandledCandle = { symbol: targetSymbol, candleTs: signalCandleTs };
-                    return;
-                }
-            } else if (isSellable) {
-                if (openPos.symbol === currentSymbol && currentPriceSymbol === currentSymbol && currentPrice > 0) {
-                    execPrice = currentPrice;
-                } else if (data.indicators && typeof data.indicators.current_price === 'number' && data.indicators.current_price > 0) {
-                    execPrice = data.indicators.current_price;
-                } else if (window.positionAssetPrice && (Date.now() - (window.positionAssetPriceTs || 0)) <= 15000) {
-                    execPrice = window.positionAssetPrice;
-                } else {
-                    execPrice = openPos.entryPrice;
-                }
-            }
-
-            if (!Number.isFinite(execPrice) || execPrice <= 0) {
-                logToTerminal(`⚠️ [SEGURIDAD] Orden abortada: precio inválido o no numérico ($${execPrice}) para ${targetSymbol}.`, 'error');
+            const signalPrice = Number(data.indicators?.current_price);
+            if (!Number.isFinite(signalPrice) || signalPrice <= 0) {
+                logToTerminal(`⚠️ [SEGURIDAD] Orden abortada: el análisis no devolvió un precio de referencia válido para ${targetSymbol}.`, 'error');
                 return;
             }
+            const execPrice = await fetchFreshExecutionQuote(targetSymbol, controller.signal);
+            if (!isAgentActive || controller.signal.aborted) return;
+            const withinSlippage = tradingGuards.isWithinSlippage(signalPrice, execPrice, 1);
+            if (isBuyable && !withinSlippage) {
+                logToTerminal(`🛑 [SLIPPAGE] Compra abortada: el precio varió más de 1% desde el análisis (${signalPrice} → ${execPrice}). Espera una señal nueva.`, 'error');
+                if (signalCandleTs > 0) lastHandledCandle = { symbol: targetSymbol, candleTs: signalCandleTs };
+                return;
+            }
+            if (isSellable && !withinSlippage) {
+                logToTerminal(`⚠️ [SLIPPAGE] La salida se ejecutará al precio fresco actual pese a una variación superior a 1% (${signalPrice} → ${execPrice}).`, 'warn');
+            }
 
+            const executionMode = document.getElementById('executionModeSelect')?.value || 'copilot';
             if (executionMode === 'auto' || executionMode === 'smart') {
                 if (signalCandleTs > 0) lastHandledCandle = { symbol: targetSymbol, candleTs: signalCandleTs };
-                executeTrade(data.signal, targetSymbol, baseCoin, execPrice, executionMode === 'smart' ? 'Inteligente' : 'Automático');
+                executeTrade(
+                    data.signal,
+                    targetSymbol,
+                    baseCoin,
+                    execPrice,
+                    executionMode === 'smart' ? 'Inteligente' : 'Automático',
+                    {
+                        verifiedQuote: true,
+                        strategyMode: data.strategy || strategyMode,
+                        strategyMetrics: data.strategy_metrics || null
+                    }
+                );
             } else {
                 stopAgent('copilot_awaiting', { copilotPause: true });
-                showCopilotModal(data.signal, targetSymbol, data.reason, baseCoin, execPrice, signalCandleTs);
+                showCopilotModal(
+                    data.signal,
+                    targetSymbol,
+                    data.reason,
+                    baseCoin,
+                    execPrice,
+                    signalCandleTs,
+                    signalPrice,
+                    { strategyMode: data.strategy || strategyMode, strategyMetrics: data.strategy_metrics || null }
+                );
             }
         }
     } catch (err) {
         if (err.name === 'AbortError') {
-            logToTerminal(`⏳ Timeout de análisis agotado en motor ${engine.toUpperCase()}. El servidor tardó demasiado.`, 'warn');
+            if (analysisAbortReason === 'stopped' || analysisAbortReason === 'circuit_breaker') {
+                logToTerminal('⏹️ Análisis cancelado; no se procesará ninguna señal tardía.', 'info');
+            } else if (analysisAbortReason === 'watchdog') {
+                logToTerminal('⏳ Análisis cancelado por exceder el tiempo máximo del ciclo.', 'warn');
+            } else {
+                logToTerminal(`⏳ Timeout de análisis agotado en motor ${engine.toUpperCase()}. El servidor tardó demasiado.`, 'warn');
+            }
         } else {
             logToTerminal('Fallo en análisis: ' + err.message, 'error');
         }
     } finally {
         if (timeoutId) clearTimeout(timeoutId);
+        if (activeAnalysisController && activeAnalysisController === controller) {
+            activeAnalysisController = null;
+            analysisAbortReason = null;
+        }
         cycleInFlight = false;
 
         // Reprogramar deterministamente si no se reprogramó expresamente arriba
@@ -1686,7 +1897,9 @@ const ejecutarAnalisis = async () => {
             let delayMs = 60000;
             if (tf === '5m') delayMs = 300000;
             if (tf === '15m') delayMs = 900000;
+            if (tf === '1h') delayMs = 3600000;
             if (engine === 'local') delayMs = 15000;
+
 
             scheduleNext(delayMs);
         }
@@ -1703,7 +1916,9 @@ setInterval(async () => {
     chartInFlight = true;
     const reqSymbol = currentSymbol;
     try {
-        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${encodeURIComponent(reqSymbol)}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&limit=60`);
+        const response = await fetch(`${API_BASE_URL}/api/market/history?symbol=${encodeURIComponent(reqSymbol)}&timeframe=${document.getElementById('timeframeSelect')?.value || '1m'}&limit=60`, {
+            headers: apiAuthHeaders()
+        });
         if (!response.ok) {
             const now = Date.now();
             if (now - lastChartErrorLogTs > 30000) {
@@ -1752,9 +1967,25 @@ setInterval(async () => {
 
 // Agente Sentimiento (Cada 60 segundos)
 async function updateSentiment() {
+    const sentimentToggle = document.getElementById('sentimentToggle');
+    if (sentimentToggle && !sentimentToggle.checked) {
+        window.currentSentimentScore = 0;
+        const badge = document.getElementById('sentimentScoreBadge');
+        const container = document.getElementById('sentimentNewsContainer');
+        if (badge) {
+            badge.innerText = 'OFF (0)';
+            badge.className = 'text-xs bg-gray-900 text-gray-400 px-2 py-1 rounded font-bold';
+        }
+        if (container) container.innerHTML = '<p class="text-xs text-gray-500">Consultas de sentimiento desactivadas.</p>';
+        return;
+    }
+
     try {
         const source = document.getElementById('newsSourceSelect')?.value || 'coindesk';
-        const response = await fetch(`${API_BASE_URL}/api/market/sentiment?symbol=${encodeURIComponent(currentSymbol)}&source=${source}`);
+        const response = await fetch(`${API_BASE_URL}/api/market/sentiment?symbol=${encodeURIComponent(currentSymbol)}&source=${source}`, {
+            headers: apiAuthHeaders()
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status} consultando sentimiento.`);
         const data = await response.json();
         if (data && !data.error) {
             window.currentSentimentScore = data.score;
@@ -1803,6 +2034,16 @@ updateSentiment();
 setInterval(updateSentiment, 60000);
 
 const newsSourceSelect = document.getElementById('newsSourceSelect');
+document.getElementById('sentimentToggle')?.addEventListener('change', (event) => {
+    if (!event.target.checked) {
+        window.currentSentimentScore = 0;
+        logToTerminal('📰 Agente de Sentimiento desactivado; no se consultarán noticias y se enviará puntaje cero.', 'info');
+    } else {
+        logToTerminal('📰 Agente de Sentimiento activado.', 'info');
+    }
+    updateSentiment();
+});
+
 if (newsSourceSelect) {
     newsSourceSelect.addEventListener('change', () => {
         logToTerminal(`Cambiando fuente de sentimiento a ${newsSourceSelect.value}...`, 'info');
@@ -1812,44 +2053,52 @@ if (newsSourceSelect) {
 
 // --- PUENTE CON MONITOR DEL MERCADO Y AGENTE DE INVERSIONES ---
 let lastInjectedTs = null;
+let lastAutoInjectedText = null;
+let lastMacroPollErrorTs = 0;
 window.currentInjectedMacro = null;
 
 async function checkInjectedMacro() {
     try {
-        const res = await fetch(`${API_BASE_URL}/api/macro/current_injected`);
-        if (!res.ok) return;
+        const res = await fetch(`${API_BASE_URL}/api/macro/current_injected`, {
+            headers: apiAuthHeaders()
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status} consultando la directiva macro.`);
         const data = await res.json();
         if (data && data.text && data.timestamp && data.timestamp !== lastInjectedTs) {
             lastInjectedTs = data.timestamp;
-            window.currentInjectedMacro = data;
+            const eligible = tradingGuards.isEligibleMacroDirective(data);
+            window.currentInjectedMacro = eligible ? data : null;
+            const macroInput = document.getElementById('macroContext');
+            if (!eligible) {
+                if (macroInput && lastAutoInjectedText && macroInput.value === lastAutoInjectedText) {
+                    macroInput.value = '';
+                }
+                lastAutoInjectedText = null;
+                logToTerminal(`⚠️ [DIRECTIVA MACRO IGNORADA] Se requiere oportunidad positiva, confianza ≥80% y antigüedad máxima de 24h.`, 'warn');
+                updateMacroRadar();
+                return;
+            }
             
             // 1. Bitácora en el terminal
             const sourceLabel = data.source || 'Monitor del Mercado';
-            logToTerminal(`🌐 [${sourceLabel.toUpperCase()}] Directiva recibida para ${data.asset || 'Activo'} (${data.confidence || 80}% conf).`, 'action');
+            logToTerminal(`🌐 [${sourceLabel.toUpperCase()}] Directiva recibida para ${data.asset} (${Number(data.confidence)}% conf).`, 'action');
             logToTerminal(`🧠 [CEREBRO DEL BOT] Tesis: "${String(data.text || '').substring(0, 90)}..."`, 'info');
-            logToTerminal(`🎯 [PREPARADO] Listo para evaluar con análisis cuantitativo y horario de mercado.`, 'warn');
+            logToTerminal(`🎯 [PREPARADO] Directiva válida; el Modo Inteligente autoriza el auto-ruteo, no la compra.`, 'warn');
             
             // 2. Si estamos en Modo Inteligente y no hay posición activa, aplicar y auto-rutear automáticamente
             if (isSmartMode() && !hasOpenPosition()) {
-                const macroInput = document.getElementById('macroContext');
                 if (macroInput) {
                     macroInput.value = data.text;
+                    lastAutoInjectedText = data.text;
                     macroInput.classList.add('border-purple-500', 'bg-purple-950/30');
                     setTimeout(() => macroInput.classList.remove('border-purple-500', 'bg-purple-950/30'), 3000);
                 }
                 logToTerminal(`⚡ [MODO INTELIGENTE] Contexto Macro actualizado automáticamente con tesis de ${data.asset}.`, 'action');
 
                 // Auto-ruteo inmediato de activo
-                const cleanSym = String(data.asset || '').trim();
-                let matchedSymbol = null;
-                if (symbolSelect && cleanSym) {
-                    for (const opt of symbolSelect.options) {
-                        if (opt.value === cleanSym || opt.value.split('/')[0] === cleanSym || cleanSym.includes(opt.value)) {
-                            matchedSymbol = opt.value;
-                            break;
-                        }
-                    }
-                }
+                const matchedSymbol = symbolSelect
+                    ? tradingGuards.matchDirectiveSymbol(data.asset, Array.from(symbolSelect.options, option => option.value))
+                    : null;
                 if (matchedSymbol && symbolSelect.value !== matchedSymbol) {
                     const candCur = getCurrency(matchedSymbol);
                     const hasCapital = (portfolio.balances[candCur] >= 5 || portfolio.VAULT >= 5);
@@ -1873,7 +2122,13 @@ async function checkInjectedMacro() {
             // 3. Refrescar radar para reflejar la tarjeta de inmediato
             updateMacroRadar();
         }
-    } catch (_) {}
+    } catch (err) {
+        const now = Date.now();
+        if (now - lastMacroPollErrorTs > 30000) {
+            logToTerminal(`⚠️ Error consultando directiva macro: ${err.message}`, 'warn');
+            lastMacroPollErrorTs = now;
+        }
+    }
 }
 setInterval(checkInjectedMacro, 3000); // Polling cada 3 segundos
 
@@ -1965,12 +2220,14 @@ async function updateMacroRadar() {
     container.innerHTML = `<p class="text-xs text-yellow-500 text-center py-2 animate-pulse">Consultando radar de oportunidades (${source})...</p>`;
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/macro/radar?engine=${engine}&source=${source}`);
+        const response = await fetch(`${API_BASE_URL}/api/macro/radar?engine=${engine}&source=${source}`, {
+            headers: apiAuthHeaders()
+        });
         const data = await response.json();
         
         container.innerHTML = '';
         if (Array.isArray(data) && data.length > 0) {
-            data.forEach((item, index) => {
+            data.forEach((item) => {
                 const isOp = item.type === 'Oportunidad';
                 const colorClass = isOp ? 'text-green-400 bg-green-400/10' : 'text-red-400 bg-red-400/10';
                 const typeColor = isOp ? 'text-green-400' : 'text-red-400';
@@ -1981,8 +2238,8 @@ async function updateMacroRadar() {
                 
                 const safeAsset = escapeHtml(item.asset || 'N/A');
                 const safeReason = escapeHtml(item.reason || '');
-                const rawReason = (item.reason || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                const rawAsset = (item.asset || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const rawReason = String(item.reason || '');
+                const rawAsset = String(item.asset || '');
                 
                 const div = document.createElement('div');
                 div.className = 'bg-gray-800 p-2.5 rounded border border-gray-600 mb-2 shadow-sm';
@@ -1998,15 +2255,21 @@ async function updateMacroRadar() {
                     <div class="flex items-center justify-between pt-1 border-t border-gray-700/60 text-[10px]">
                         <span class="text-gray-500 text-[9px]">⏳ ${escapeHtml(item.schedule || 'Inmediato')}</span>
                         <div class="flex items-center gap-1.5">
-                            <button onclick="window.applyMacroContext('${rawAsset}', '${rawReason}')" class="bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded text-[10px] font-semibold transition flex items-center gap-1 shadow cursor-pointer" title="Cargar tesis en Contexto Macro">
+                            <button class="macro-apply-context bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded text-[10px] font-semibold transition flex items-center gap-1 shadow cursor-pointer" title="Cargar tesis en Contexto Macro">
                                 <span>📥</span> Aplicar a Macro
                             </button>
-                            <button onclick="window.copyMacroText('${rawReason}', this)" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-1.5 py-0.5 rounded text-[10px] transition cursor-pointer" title="Copiar tesis">
+                            <button class="macro-copy-text bg-gray-700 hover:bg-gray-600 text-gray-200 px-1.5 py-0.5 rounded text-[10px] transition cursor-pointer" title="Copiar tesis">
                                 📋 Copiar
                             </button>
                         </div>
                     </div>
                 `;
+                div.querySelector('.macro-apply-context').addEventListener('click', () => {
+                    window.applyMacroContext(rawAsset, rawReason);
+                });
+                div.querySelector('.macro-copy-text').addEventListener('click', (event) => {
+                    window.copyMacroText(rawReason, event.currentTarget);
+                });
                 container.appendChild(div);
             });
         } else {
@@ -2276,9 +2539,7 @@ function addTradeToHistory(signal, symbol, baseCoin, price, status, mode, fee = 
     localStorage.setItem('ai_trade_history_v2', JSON.stringify(tradeHistoryLog));
     
     // Guardar en backend CSV incluyendo X-API-Token si existe
-    const token = localStorage.getItem('ai_app_token') || '';
-    const headers = { 'Content-Type': 'application/json' };
-    if (token) headers['X-API-Token'] = token;
+    const headers = apiAuthHeaders({ 'Content-Type': 'application/json' });
 
     fetch(`${API_BASE_URL}/api/log_trade`, {
         method: 'POST',
@@ -2299,7 +2560,14 @@ function addTradeToHistory(signal, symbol, baseCoin, price, status, mode, fee = 
     renderTradeHistory();
 }
 
-function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
+function executeTrade(
+    signal,
+    symbol,
+    baseCoin,
+    price,
+    mode = 'Automático',
+    { verifiedQuote = false, strategyMode = 'manual', strategyMetrics = null } = {}
+) {
     // Soporte retrocompatible de 4 argumentos
     if (typeof baseCoin === 'number') {
         mode = price || 'Automático';
@@ -2308,19 +2576,17 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
         symbol = symbol ? (symbol.includes('/') ? symbol : symbol + '/USDT') : currentSymbol;
     }
 
+    if (signal !== 'COMPRAR' && signal !== 'VENDER') {
+        logToTerminal(`⚠️ Ejecución abortada: señal no reconocida (${signal}).`, 'error');
+        return;
+    }
     if (isExecutingTrade) {
         logToTerminal('⚠️ Operación en curso. Ignorando solicitud concurrente.', 'warn');
         return;
     }
     if (!Number.isFinite(price) || price <= 0) {
-        if (signal === 'VENDER' && hasOpenPosition()) {
-            const fallbackPos = getOpenPosition();
-            price = (fallbackPos && fallbackPos.entryPrice > 0) ? fallbackPos.entryPrice : 1;
-            logToTerminal(`⚠️ Precio no disponible en tiempo real; ejecutando venta al precio de referencia ($${price}).`, 'warn');
-        } else {
-            logToTerminal(`⚠️ Ejecución abortada: precio inválido o no numérico ($${price}).`, 'error');
-            return;
-        }
+        logToTerminal(`⚠️ Ejecución abortada: precio inválido o no numérico ($${price}).`, 'error');
+        return;
     }
 
     const effectiveSymbol = symbol || currentSymbol;
@@ -2354,8 +2620,14 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
             logToTerminal(`⚠️ Venta ignorada: no hay posición abierta que cerrar.`, 'warn');
             return;
         }
-
-        const feeRate = getBrokerFeeRate();
+        const configuredFeeRate = getBrokerFeeRate();
+        const feeRate = signal === 'VENDER' && openPos.feeRate !== undefined
+            ? openPos.feeRate
+            : configuredFeeRate;
+        if (!Number.isFinite(feeRate) || feeRate < 0 || feeRate > 10) {
+            logToTerminal('⚠️ Ejecución abortada: la comisión guardada en la posición es inválida.', 'error');
+            return;
+        }
         if (signal === 'COMPRAR') {
             // R4: Bloqueo de compra por Circuit Breaker
             if (isCircuitBreakerActive()) {
@@ -2373,51 +2645,141 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
             }
 
             const riskFactor = parseFloat(document.getElementById('riskSelect')?.value || "0.25");
-            
-            // JIT Funding (Cuentas Ómnibus / Bóveda central): Si la billetera operativa tiene saldo insuficiente pero hay fondos en la Bóveda
-            let isJitAllocated = false;
-            if (portfolio.balances[currency] < 5 && portfolio.VAULT >= 5) {
-                const vaultAlloc = Math.max(5.0, portfolio.VAULT * riskFactor);
-                const safeAlloc = Math.min(portfolio.VAULT, vaultAlloc);
-                if (safeAlloc >= 5.0) {
-                    portfolio.VAULT -= safeAlloc;
-                    const destAmount = (currency === 'ARS') ? (safeAlloc * 1000.0) : safeAlloc;
-                    portfolio.balances[currency] += destAmount;
-                    portfolio.deposits[currency] = (portfolio.deposits[currency] || 0) + destAmount;
-                    isJitAllocated = true;
-                    logToTerminal(`🏦 [JIT FUNDING] Asignados $${safeAlloc.toFixed(2)} USD desde la Bóveda a ${currency} para ejecutar la oportunidad.`, 'action');
-                }
+            if (!Number.isFinite(riskFactor) || riskFactor <= 0 || riskFactor > 1) {
+                logToTerminal('⚠️ Ejecución abortada: nivel de riesgo inválido; usa un valor mayor que 0 y hasta 100%.', 'error');
+                return;
             }
-
-            const maxRiesgo = portfolio.balances[currency] * riskFactor;
-            const tradeAmount = maxRiesgo;
+            const tradeStrategyMode = strategyMode === 'mean_reversion_atr' ? strategyMode : 'manual';
+            const spreadRate = getEstimatedSpreadRate();
+            if (!Number.isFinite(spreadRate)) {
+                logToTerminal('⚠️ Ejecución abortada: spread estimado inválido; usa un valor entre 0 y 5%.', 'error');
+                return;
+            }
+            const minProfitPct = getMinimumNetProfitPct();
+            if (!Number.isFinite(minProfitPct)) {
+                logToTerminal('⚠️ Ejecución abortada: beneficio neto mínimo inválido; usa un valor entre 0 y 5%.', 'error');
+                return;
+            }
+            let tpLimit;
+            let slLimit;
+            if (tradeStrategyMode === 'mean_reversion_atr') {
+                if (
+                    !strategyMetrics
+                    || strategyMetrics.mode !== 'mean_reversion_atr'
+                    || strategyMetrics.candidate_eligible !== true
+                    || !Number.isFinite(strategyMetrics.atr_14)
+                    || strategyMetrics.atr_14 <= 0
+                ) {
+                    logToTerminal('🛑 Compra ATR abortada: faltan métricas cuantitativas válidas y aprobadas por el backend.', 'error');
+                    return;
+                }
+                tpLimit = (2.5 * strategyMetrics.atr_14 / price) * 100;
+                slLimit = (1.5 * strategyMetrics.atr_14 / price) * 100;
+            } else {
+                const tpSlVal = document.getElementById('tpSlSelect')?.value || "1.5|-1.0";
+                const [tpStr, slStr] = tpSlVal.split('|');
+                tpLimit = Math.abs(parseFloat(tpStr)) || 1.5;
+                slLimit = Math.abs(parseFloat(slStr)) || 1.0;
+            }
+            const tpNet = tradingGuards.netReturnAfterCosts(tpLimit, feeRate, spreadRate);
+            const slNet = tradingGuards.netReturnAfterCosts(-slLimit, feeRate, spreadRate);
+            const requiredNetTp = tradeStrategyMode === 'mean_reversion_atr'
+                ? Math.max(0.5, minProfitPct)
+                : minProfitPct;
+            const roundTripCost = 2 * (feeRate + spreadRate);
+            const atrCostHurdleFails = tradeStrategyMode === 'mean_reversion_atr'
+                && tpLimit < roundTripCost * 3.5;
+            if (atrCostHurdleFails) {
+                logToTerminal('🛑 Compra ATR abortada: el TP bruto actualizado no cubre 3.5 veces el costo ida/vuelta estimado.', 'error');
+                return;
+            }
+            if (!Number.isFinite(tpNet) || !Number.isFinite(slNet) || tpNet < requiredNetTp) {
+                logToTerminal(`🛑 Compra abortada: TP neto estimado (${Number.isFinite(tpNet) ? tpNet.toFixed(3) : 'inválido'}%) inferior al mínimo requerido (${requiredNetTp.toFixed(3)}%).`, 'error');
+                return;
+            }
+            const executedStrategyMetrics = tradeStrategyMode === 'mean_reversion_atr'
+                ? { ...strategyMetrics, tp_gross_pct: tpLimit, sl_gross_pct: slLimit, tp_net_pct: tpNet, sl_net_pct: slNet }
+                : null;
+            
+            let isJitAllocated = false;
+            let jitTradeAmount = 0;
+            let tradeAmount;
+            if (tradeStrategyMode === 'mean_reversion_atr') {
+                const riskBudgetPct = getQuantRiskBudgetPct();
+                if (!Number.isFinite(riskBudgetPct)) {
+                    logToTerminal('🛑 Compra ATR abortada: presupuesto de riesgo inválido.', 'error');
+                    return;
+                }
+                const vaultConversion = currency === 'ARS' ? 1000 : 1;
+                const walletBalance = portfolio.balances[currency];
+                const availableVault = portfolio.VAULT * vaultConversion;
+                const accountEquity = walletBalance + availableVault;
+                tradeAmount = tradingGuards.positionSizeForRiskBudget(
+                    accountEquity,
+                    slNet,
+                    riskBudgetPct,
+                    riskFactor,
+                    accountEquity
+                );
+                if (!Number.isFinite(tradeAmount)) {
+                    logToTerminal('🛑 Compra ATR abortada: no se pudo calcular un tamaño de posición seguro.', 'error');
+                    return;
+                }
+                if (tradeAmount < 5) {
+                    logToTerminal('⚠️ Saldo insuficiente: el tamaño calculado por presupuesto de riesgo es menor al mínimo de $5.', 'error');
+                    return;
+                }
+                if (tradeAmount > walletBalance && portfolio.VAULT > 0) {
+                    const vaultContribution = Math.min(tradeAmount - walletBalance, availableVault);
+                    const vaultUsd = vaultContribution / vaultConversion;
+                    portfolio.VAULT -= vaultUsd;
+                    portfolio.balances[currency] += vaultContribution;
+                    jitTradeAmount = vaultContribution;
+                    isJitAllocated = vaultContribution > 0;
+                    logToTerminal(`🏦 [JIT FUNDING] Asignados $${vaultUsd.toFixed(2)} USD desde la Bóveda para cubrir el riesgo calculado de la operación ATR.`, 'action');
+                }
+            } else {
+                if (portfolio.balances[currency] < 5 && portfolio.VAULT >= 5) {
+                    const vaultAlloc = portfolio.VAULT * riskFactor;
+                    const safeAlloc = Math.min(portfolio.VAULT, vaultAlloc);
+                    if (safeAlloc >= 5.0) {
+                        portfolio.VAULT -= safeAlloc;
+                        const destAmount = (currency === 'ARS') ? (safeAlloc * 1000.0) : safeAlloc;
+                        portfolio.balances[currency] += destAmount;
+                        jitTradeAmount = destAmount;
+                        isJitAllocated = true;
+                        logToTerminal(`🏦 [JIT FUNDING] Asignados $${safeAlloc.toFixed(2)} USD desde la Bóveda a ${currency} para ejecutar la oportunidad.`, 'action');
+                    }
+                }
+                tradeAmount = isJitAllocated ? jitTradeAmount : portfolio.balances[currency] * riskFactor;
+            }
             
             if (tradeAmount < 5) {
                 logToTerminal('⚠️ Saldo insuficiente para abrir nueva posición (mínimo $5).', 'error');
                 return;
             }
 
-            const feeAmount = tradeAmount * (feeRate / 100);
-            const capitalNeto = tradeAmount - feeAmount;
-            const cantidadAComprar = capitalNeto / price;
-            
-            const tpSlVal = document.getElementById('tpSlSelect')?.value || "1.5|-1.0";
-            const [tpStr, slStr] = tpSlVal.split('|');
-            const tpLimit = Math.abs(parseFloat(tpStr)) || 1.5;
-            const slLimit = Math.abs(parseFloat(slStr)) || 1.0;
+            const buyFillPrice = price * (1 + spreadRate / 100);
+            const cantidadAComprar = tradeAmount / (buyFillPrice * (1 + feeRate / 100));
+            const feeAmount = cantidadAComprar * buyFillPrice * (feeRate / 100);
 
             portfolio.position = {
                 symbol: effectiveSymbol,
                 baseCoin: baseCoin,
                 currency: currency,
                 qty: cantidadAComprar,
-                entryPrice: price,
+                entryPrice: buyFillPrice,
                 costBasis: tradeAmount,
-                feeRate: feeRate, // Guardar pos.feeRate al abrir la posición
-                tp: tpLimit,
+                feeRate: feeRate,
+                spreadRate: spreadRate,
+                minProfitPct: minProfitPct,
+                tp: tpNet,
                 sl: slLimit,
-                stopNetPct: -slLimit, // R1: stop neto firmado (ej. -1.0)
-                peakPrice: price,
+                stopNetPct: slNet,
+                strategyMode: tradeStrategyMode,
+                strategyMetrics: executedStrategyMetrics,
+                riskBudgetPct: tradeStrategyMode === 'mean_reversion_atr' ? getQuantRiskBudgetPct() : null,
+                peakPrice: buyFillPrice,
                 beArmed: false,
                 trailActive: false,
                 trailPct: 0.5,
@@ -2435,21 +2797,24 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
             window.positionAssetPrice = null;
             window.positionAssetPriceTs = 0;
             
-            logToTerminal(`💰 SIMULACIÓN: COMPRADO ${cantidadAComprar.toFixed(4)} ${baseCoin} (${effectiveSymbol}) a $${price.toLocaleString()} (Inversión: $${tradeAmount.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%] | TP: +${tpLimit}% | SL: -${slLimit}%)`, 'action');
-            addTradeToHistory(signal, effectiveSymbol, baseCoin, price, 'Ejecutada', mode, feeAmount, cantidadAComprar);
+            logToTerminal(`💰 SIMULACIÓN: COMPRADO ${cantidadAComprar.toFixed(4)} ${baseCoin} (${effectiveSymbol}) a $${buyFillPrice.toLocaleString()} (mercado: $${price.toLocaleString()} | spread estimado: ${spreadRate}% | inversión total: $${tradeAmount.toFixed(2)} | fee: $${feeAmount.toFixed(2)} | TP neto: +${tpNet.toFixed(3)}% | SL neto: ${slNet.toFixed(3)}%)`, 'action');
+            addTradeToHistory(signal, effectiveSymbol, baseCoin, buyFillPrice, 'Ejecutada', mode, feeAmount, cantidadAComprar);
         } else if (signal === 'VENDER') {
             // VENDER siempre usa los datos reales de la posición (Bloque 1 item 5)
             const pos = openPos;
             const sellSymbol = pos.symbol;
             const sellCoin = pos.baseCoin;
             const sellCurrency = pos.currency || getCurrency(sellSymbol);
+            if (sellSymbol !== effectiveSymbol || !Number.isFinite(portfolio.balances[sellCurrency])) {
+                logToTerminal(`⚠️ Ejecución abortada: activo o saldo de billetera no coincide con la posición ${sellSymbol}.`, 'error');
+                return;
+            }
             const posQty = pos.qty;
             const feeRate = (pos && typeof pos.feeRate === 'number') ? pos.feeRate : getBrokerFeeRate();
 
             // Validación de frescura en milisegundos para ventas si no está en pantalla (Bloque 1 y 2)
             let execSellPrice = price;
-            const isExemptFromStaleCheck = ['Manual', 'Stop Loss', 'Breakeven', 'Breakeven Stop', 'Trailing', 'Trailing Stop', 'Take Profit'].includes(mode);
-            if (sellSymbol !== currentSymbol && !isExemptFromStaleCheck) {
+            if (sellSymbol !== currentSymbol && !verifiedQuote) {
                 const nowMs = Date.now();
                 const ageMs = nowMs - (window.positionAssetPriceTs || 0);
                 const thresholdMs = sellSymbol.includes('/') ? 20000 : 150000;
@@ -2458,17 +2823,30 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
                     return;
                 }
                 execSellPrice = window.positionAssetPrice;
-            } else if (sellSymbol !== currentSymbol && isExemptFromStaleCheck) {
-                if (typeof window.positionAssetPrice === 'number' && window.positionAssetPrice > 0) {
-                    execSellPrice = window.positionAssetPrice;
-                } else if (price > 0) {
-                    execSellPrice = price;
-                } else {
-                    execSellPrice = pos.entryPrice || 1;
-                }
             }
 
-            const dolaresObtenidosBruto = posQty * execSellPrice;
+            const spreadRate = Number.isFinite(pos.spreadRate) ? pos.spreadRate : 0;
+            if (spreadRate < 0 || spreadRate > 5) {
+                logToTerminal('⚠️ Ejecución abortada: spread guardado en la posición inválido.', 'error');
+                return;
+            }
+            const minProfitPct = Number.isFinite(pos.minProfitPct)
+                ? pos.minProfitPct
+                : getMinimumNetProfitPct();
+            if (!Number.isFinite(minProfitPct) || minProfitPct < 0 || minProfitPct > 5) {
+                logToTerminal('⚠️ Venta de estrategia bloqueada: beneficio neto mínimo inválido; corrige el parámetro en Ajustes.', 'error');
+                return;
+            }
+            const strategyProfitExit = ['Copiloto', 'Inteligente', 'Automático', 'Take Profit'].includes(mode);
+            if (strategyProfitExit) {
+                const netProfitPct = netPctAtPrice(pos, execSellPrice, feeRate);
+                if (tradingGuards.shouldBlockProfitTakingExit(netProfitPct, minProfitPct)) {
+                    logToTerminal(`🛑 Venta de estrategia bloqueada: PnL neto estimado ${Number.isFinite(netProfitPct) ? netProfitPct.toFixed(3) : 'inválido'}%, por debajo del mínimo ${minProfitPct.toFixed(3)}%. Los cierres Stop Loss, breakeven, trailing y manual siguen permitidos.`, 'warn');
+                    return;
+                }
+            }
+            const sellFillPrice = execSellPrice * (1 - spreadRate / 100);
+            const dolaresObtenidosBruto = posQty * sellFillPrice;
             const feeAmount = dolaresObtenidosBruto * (feeRate / 100);
             const dolaresNetos = dolaresObtenidosBruto - feeAmount;
             const costBasis = pos.costBasis || (posQty * pos.entryPrice);
@@ -2498,15 +2876,16 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
             recordTradeInCircuitBreaker(pnlNeto, sellCurrency);
 
             // R8: Cooldown post-cierre al cerrar posición (manual, SL o TP)
-            const tfSecMap = { '1m': 60, '5m': 300, '15m': 900 };
+            const tfSecMap = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 };
             const tfVal = document.getElementById('timeframeSelect')?.value || '1m';
             const tfSec = tfSecMap[tfVal] || 60;
+
             const cooldownMs = Math.max(300000, 3 * tfSec * 1000);
             const cooldownUntil = Date.now() + cooldownMs;
             localStorage.setItem('ai_cooldown_v1', String(cooldownUntil));
             logToTerminal(`⏳ [COOLDOWN INICIADO] Pausa de ${(cooldownMs / 60000).toFixed(1)} min para nuevas compras tras cierre de posición.`, 'info');
 
-            logToTerminal(`💵 SIMULACIÓN: VENDIDO ${sellCoin} (${sellSymbol}) a $${execSellPrice.toLocaleString()} (Bruto: $${dolaresObtenidosBruto.toFixed(2)} | Fee Broker: $${feeAmount.toFixed(2)} [${feeRate}%] | Neto: $${dolaresNetos.toFixed(2)} | PnL: ${pnlNeto >= 0 ? '+' : ''}$${pnlNeto.toFixed(2)}). Saldo ${sellCurrency}: $${portfolio.balances[sellCurrency].toFixed(2)}`, 'error');
+            logToTerminal(`💵 SIMULACIÓN: VENDIDO ${sellCoin} (${sellSymbol}) a $${sellFillPrice.toLocaleString()} (mercado: $${execSellPrice.toLocaleString()} | spread estimado: ${spreadRate}% | bruto: $${dolaresObtenidosBruto.toFixed(2)} | fee: $${feeAmount.toFixed(2)} | neto: $${dolaresNetos.toFixed(2)} | PnL: ${pnlNeto >= 0 ? '+' : ''}$${pnlNeto.toFixed(2)}). Saldo ${sellCurrency}: $${portfolio.balances[sellCurrency].toFixed(2)}`, 'error');
             
             // Graceful Shutdown: Apagado programado post-cierre
             if (isStopAfterCloseArmed) {
@@ -2544,7 +2923,7 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
                     logToTerminal(`🔒 AUTO-VAULT: Rentabilidad del ${profitPct.toFixed(2)}% alcanzada. Ganancia de $${profitToSweep.toFixed(2)} transferida a la Bóveda Segura.`, 'action');
                 }
             }
-            addTradeToHistory(signal, sellSymbol, sellCoin, execSellPrice, 'Ejecutada', mode, feeAmount, posQty);
+            addTradeToHistory(signal, sellSymbol, sellCoin, sellFillPrice, 'Ejecutada', mode, feeAmount, posQty);
         }
         
         localStorage.setItem('ai_portfolio_v5', JSON.stringify(portfolio));
@@ -2557,7 +2936,16 @@ function executeTrade(signal, symbol, baseCoin, price, mode = 'Automático') {
 let pendingTrade = null;
 const modal = document.getElementById('copilotModal');
 
-function showCopilotModal(signal, symbol, reason, baseCoin, price, candleTs = 0) {
+function showCopilotModal(
+    signal,
+    symbol,
+    reason,
+    baseCoin,
+    price,
+    candleTs = 0,
+    signalPrice = price,
+    tradeSettings = {}
+) {
     if (copilotExpiryTimer) {
         clearInterval(copilotExpiryTimer);
         copilotExpiryTimer = null;
@@ -2565,7 +2953,17 @@ function showCopilotModal(signal, symbol, reason, baseCoin, price, candleTs = 0)
     document.getElementById('copilotMessage').innerText = `El Agente recomienda ${signal} ${baseCoin} (${symbol}) a $${price.toLocaleString()}`;
     document.getElementById('copilotReason').innerText = `Razonamiento: ${reason}`;
     modal.classList.remove('hidden');
-    pendingTrade = { signal, symbol, baseCoin, price, signalPrice: price, candleTs: Number(candleTs) || 0, openedAt: Date.now() };
+    pendingTrade = {
+        signal,
+        symbol,
+        baseCoin,
+        price,
+        signalPrice,
+        candleTs: Number(candleTs) || 0,
+        openedAt: Date.now(),
+        strategyMode: tradeSettings.strategyMode || 'manual',
+        strategyMetrics: tradeSettings.strategyMetrics || null
+    };
 
     let timeLeft = 120;
     copilotExpiryTimer = setInterval(() => {
@@ -2609,9 +3007,10 @@ document.getElementById('btnReject').addEventListener('click', () => {
             lastHandledCandle = { symbol: pendingTrade.symbol, candleTs: pendingTrade.candleTs };
         }
         // Cooldown tras rechazar para no reabrir el modal inmediatamente (Bloque 4)
-        const tfSecMap = { '1m': 60, '5m': 300, '15m': 900 };
+        const tfSecMap = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 };
         const tfVal = document.getElementById('timeframeSelect')?.value || '1m';
         const tfSec = tfSecMap[tfVal] || 60;
+
         const cooldownMs = Math.max(300000, 3 * tfSec * 1000);
         const cooldownUntil = Date.now() + cooldownMs;
         localStorage.setItem('ai_cooldown_v1', String(cooldownUntil));
@@ -2623,7 +3022,7 @@ document.getElementById('btnReject').addEventListener('click', () => {
     scheduleNext(15000);
 });
 
-document.getElementById('btnApprove').addEventListener('click', () => {
+document.getElementById('btnApprove').addEventListener('click', async () => {
     if (copilotExpiryTimer) {
         clearInterval(copilotExpiryTimer);
         copilotExpiryTimer = null;
@@ -2689,28 +3088,46 @@ document.getElementById('btnApprove').addEventListener('click', () => {
                 scheduleNext(15000);
                 return;
             }
-            if (tradeSymbol !== currentSymbol) {
-                const ageMs = Date.now() - (window.positionAssetPriceTs || 0);
-                const thresholdMs = tradeSymbol.includes('/') ? 20000 : 150000;
-                if (!window.positionAssetPrice || ageMs > thresholdMs) {
-                    logToTerminal(`⚠️ [APROBACIÓN ABORTADA] No hay precio fresco (< ${thresholdMs / 1000}s) para vender ${tradeSymbol}. Espera respuesta del feed de fondo.`, 'error');
-                    if (candleTs > 0) lastHandledCandle = { symbol: tradeSymbol, candleTs };
-                    pendingTrade = null;
-                    copilotState = 'idle';
-                    startAgent('copilot_discarded');
-                    scheduleNext(15000);
-                    return;
-                }
-            }
         }
 
-        // 2. Control de Slippage
-        const evalCurrentPrice = (tradeSymbol === currentSymbol) ? currentPrice : (window.positionAssetPrice || pendingTrade.signalPrice);
-        if (pendingTrade.signalPrice > 0) {
-            const priceDiffPct = Math.abs((evalCurrentPrice - pendingTrade.signalPrice) / pendingTrade.signalPrice) * 100;
-            if (priceDiffPct > 1.0) {
-                logToTerminal(`⚠️ Deslizamiento detectado (${priceDiffPct.toFixed(2)}%). Ejecutando a precio actual: $${evalCurrentPrice.toLocaleString()}`, 'warn');
-            }
+        let evalCurrentPrice;
+        try {
+            evalCurrentPrice = await fetchFreshExecutionQuote(tradeSymbol);
+        } catch (err) {
+            logToTerminal(`⚠️ [APROBACIÓN ABORTADA] No se obtuvo un precio fresco y ejecutable: ${err.message}`, 'error');
+            pendingTrade = null;
+            copilotState = 'idle';
+            startAgent('copilot_discarded');
+            scheduleNext(15000);
+            return;
+        }
+        if (!pendingTrade) return;
+
+        const refreshedPos = getOpenPosition();
+        if (
+            (pendingTrade.signal === 'COMPRAR' && refreshedPos)
+            || (pendingTrade.signal === 'VENDER' && (!refreshedPos || refreshedPos.symbol !== tradeSymbol))
+        ) {
+            logToTerminal('⚠️ Orden descartada: el estado de la posición cambió durante la verificación del precio.', 'warn');
+            pendingTrade = null;
+            copilotState = 'idle';
+            startAgent('copilot_discarded');
+            scheduleNext(15000);
+            return;
+        }
+
+        const withinSlippage = tradingGuards.isWithinSlippage(pendingTrade.signalPrice, evalCurrentPrice, 1);
+        if (pendingTrade.signal === 'COMPRAR' && !withinSlippage) {
+            logToTerminal(`🛑 [SLIPPAGE] Compra no aprobada: el precio varió más de 1% desde la señal (${pendingTrade.signalPrice} → ${evalCurrentPrice}).`, 'error');
+            if (candleTs > 0) lastHandledCandle = { symbol: tradeSymbol, candleTs };
+            pendingTrade = null;
+            copilotState = 'idle';
+            startAgent('copilot_discarded');
+            scheduleNext(15000);
+            return;
+        }
+        if (pendingTrade.signal === 'VENDER' && !withinSlippage) {
+            logToTerminal(`⚠️ [SLIPPAGE] Salida autorizada al precio fresco actual pese a una variación superior a 1% (${pendingTrade.signalPrice} → ${evalCurrentPrice}).`, 'warn');
         }
 
         if (candleTs > 0) {
@@ -2718,7 +3135,18 @@ document.getElementById('btnApprove').addEventListener('click', () => {
         }
 
         logToTerminal('✅ Operación aprobada por el usuario.', 'action');
-        executeTrade(pendingTrade.signal, tradeSymbol, pendingTrade.baseCoin, evalCurrentPrice, 'Copiloto');
+        executeTrade(
+            pendingTrade.signal,
+            tradeSymbol,
+            pendingTrade.baseCoin,
+            evalCurrentPrice,
+            'Copiloto',
+            {
+                verifiedQuote: true,
+                strategyMode: pendingTrade.strategyMode,
+                strategyMetrics: pendingTrade.strategyMetrics
+            }
+        );
         pendingTrade = null;
     }
     copilotState = 'idle';
@@ -2727,15 +3155,28 @@ document.getElementById('btnApprove').addEventListener('click', () => {
 });
 
 // Cierre Manual de Emergencia (Bloque 1 item 6, Bloque 4 item 3)
-window.forceClosePosition = function(event) {
+window.forceClosePosition = async function(event) {
     if (event) {
         event.stopPropagation?.();
         event.preventDefault?.();
     }
     const pos = getOpenPosition();
-    if (pos) {
-        logToTerminal(`⚠️ CIERRE MANUAL: El usuario forzó el cierre de la posición activa en ${pos.symbol}.`, 'error');
-        
+    if (!pos) {
+        logToTerminal(`ℹ️ No hay posición abierta que cerrar.`, 'info');
+        return;
+    }
+    if (manualCloseInFlight || isExecutingTrade) {
+        logToTerminal('⚠️ Cierre manual no iniciado: ya hay una operación en curso.', 'warn');
+        return;
+    }
+
+    manualCloseInFlight = true;
+    try {
+        logToTerminal(`⚠️ CIERRE MANUAL: Solicitando cotización fresca para cerrar ${pos.symbol}.`, 'error');
+        const wasAgentActive = isAgentActive;
+        if (isAgentActive) {
+            stopAgent('force_close');
+        }
         if (modal && !modal.classList.contains('hidden')) {
             if (copilotExpiryTimer) {
                 clearInterval(copilotExpiryTimer);
@@ -2747,27 +3188,19 @@ window.forceClosePosition = function(event) {
         copilotState = 'idle';
         isCopilotApprovalPause = false;
 
-        let activePrice = 0;
-        if (pos.symbol === currentSymbol && typeof currentPrice === 'number' && currentPrice > 0) {
-            activePrice = currentPrice;
-        } else if (typeof window.positionAssetPrice === 'number' && window.positionAssetPrice > 0) {
-            activePrice = window.positionAssetPrice;
-        } else if (typeof pos.entryPrice === 'number' && pos.entryPrice > 0) {
-            activePrice = pos.entryPrice;
-        } else {
-            activePrice = 1;
+        const freshPrice = await fetchFreshExecutionQuote(pos.symbol);
+        if (getOpenPosition() !== pos) {
+            logToTerminal('⚠️ Cierre manual cancelado: la posición cambió mientras se verificaba la cotización.', 'warn');
+            return;
         }
-
-        // Liberar mutex para asegurar que la orden manual no sea bloqueada por una verificación concurrente
-        isExecutingTrade = false;
-        executeTrade('VENDER', pos.symbol, pos.baseCoin, activePrice, 'Manual');
-        
-        if (isAgentActive) {
-            stopAgent('force_close');
-            logToTerminal(`Agente detenido automáticamente por cierre manual. Vuelve a activarlo cuando desees.`, 'warn');
+        executeTrade('VENDER', pos.symbol, pos.baseCoin, freshPrice, 'Manual', { verifiedQuote: true });
+        if (!getOpenPosition() && wasAgentActive) {
+            logToTerminal('Agente detenido automáticamente por cierre manual. Vuelve a activarlo cuando desees.', 'warn');
         }
-    } else {
-        logToTerminal(`ℹ️ No hay posición abierta que cerrar.`, 'info');
+    } catch (err) {
+        logToTerminal(`🛑 Cierre manual abortado: no se obtuvo una cotización fresca y ejecutable para ${pos.symbol} (${err.message}).`, 'error');
+    } finally {
+        manualCloseInFlight = false;
     }
 };
 window.cerrarPosicion = window.forceClosePosition;
@@ -2829,13 +3262,9 @@ document.getElementById('saveApiKeyBtn')?.addEventListener('click', async () => 
     const key = document.getElementById('apiKeyInput').value;
     if(!key) return;
     try {
-        const token = localStorage.getItem('ai_app_token') || '';
-        const headers = {'Content-Type': 'application/json'};
-        if (token) headers['X-API-Token'] = token;
-
         const response = await fetch(`${API_BASE_URL}/api/config/gemini`, {
             method: 'POST',
-            headers,
+            headers: apiAuthHeaders({'Content-Type': 'application/json'}),
             body: JSON.stringify({api_key: key})
         });
         const data = await response.json();
@@ -2850,8 +3279,28 @@ document.getElementById('saveApiKeyBtn')?.addEventListener('click', async () => 
     }
 });
 
+const appTokenInput = document.getElementById('appTokenInput');
+if (appTokenInput) {
+    appTokenInput.value = sessionStorage.getItem('ai_app_token') || '';
+}
+document.getElementById('saveAppTokenBtn')?.addEventListener('click', () => {
+    const token = appTokenInput?.value.trim() || '';
+    if (token) {
+        sessionStorage.setItem('ai_app_token', token);
+        logToTerminal('Token local de API guardado en esta sesión del navegador.', 'success');
+    } else {
+        sessionStorage.removeItem('ai_app_token');
+        logToTerminal('Token local borrado del navegador.', 'warn');
+    }
+});
+
 document.getElementById('timeframeSelect')?.addEventListener('change', () => {
-    logToTerminal(`Cambiando temporalidad a ${document.getElementById('timeframeSelect').value}...`, 'warn');
+    const sel = document.getElementById('timeframeSelect');
+    if (getStrategyMode() === 'mean_reversion_atr' && !tradingGuards.isAllowedAtrTimeframe(sel.value)) {
+        logToTerminal(`⚠️ La estrategia cuantitativa ATR solo admite temporalidades de 15m o 1h. Ajustando a 15m.`, 'warn');
+        sel.value = '15m';
+    }
+    logToTerminal(`Cambiando temporalidad a ${sel.value}...`, 'warn');
     candleSeries.setData([]);
     smaSeries.setData([]);
     vwapSeries.setData([]);
@@ -2859,6 +3308,7 @@ document.getElementById('timeframeSelect')?.addEventListener('change', () => {
     vwapLowerSeries.setData([]);
     fetchMarketData();
 });
+
 
 document.getElementById('riskSelect')?.addEventListener('change', () => {
     logToTerminal(`Riesgo actualizado a: ${document.getElementById('riskSelect').options[document.getElementById('riskSelect').selectedIndex].text}`, 'info');
@@ -3253,7 +3703,10 @@ window.purgarMemoriaIA = async function(silent = false) {
         lobbyReportBox.innerHTML = '<span class="text-yellow-400 font-bold animate-pulse">🧹 Purgando procesos colgados y desalojando modelos de la memoria RAM...</span>';
     }
     try {
-        const res = await fetch(`${API_BASE_URL}/api/ollama/purge`, { method: "POST" });
+        const res = await fetch(`${API_BASE_URL}/api/ollama/purge`, {
+            method: "POST",
+            headers: apiAuthHeaders()
+        });
         const data = await res.json();
         const modelsList = (data.unloaded_models && data.unloaded_models.length > 0)
             ? data.unloaded_models.join(", ")
@@ -3308,7 +3761,10 @@ async function abortPremarketProcess(source = 'lobby') {
     }
 
     try {
-        const res = await fetch(`${API_BASE_URL}/api/macro/premarket/cancel`, { method: "POST" });
+        const res = await fetch(`${API_BASE_URL}/api/macro/premarket/cancel`, {
+            method: "POST",
+            headers: apiAuthHeaders()
+        });
         const data = await res.json();
         logToTerminal(`✅ Pre-Market: ${data.message || 'Memoria RAM liberada'}`, "success");
         if (lobbyReportBox && source === 'lobby') {
@@ -3340,6 +3796,7 @@ if (btnPremarket) {
         
         try {
             const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`, {
+                headers: apiAuthHeaders(),
                 signal: premarketAbortController.signal
             });
             const data = await res.json();
@@ -3462,6 +3919,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             try {
                 const res = await fetch(`${API_BASE_URL}/api/macro/premarket?engine=${engine}`, {
+                    headers: apiAuthHeaders(),
                     signal: premarketAbortController.signal
                 });
                 const data = await res.json();

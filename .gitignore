@@ -2,6 +2,13 @@
 venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.~lock.*
+*.db
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
 historial_trades.csv
 historial_trades_legacy.csv
 scripts_antiguos/

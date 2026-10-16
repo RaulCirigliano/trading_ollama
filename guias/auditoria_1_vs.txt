@@ -1,0 +1,87 @@
+ERROR DE PROMPT EJECUTADO PARA OLLAMA EN VEZ DE MERCADO.
+
+Actúa como ingeniero de software senior y responsable de calidad. Audita este repositorio de extremo a extremo y corrige los errores reales que encuentres. No te limites a dar recomendaciones: inspecciona el código, reproduce los problemas cuando sea posible, implementa reparaciones puntuales y verifica los resultados.
+
+## Contexto del proyecto
+
+Es una aplicación Python llamada “Monitor del Mercado”. Recopila noticias RSS, obtiene cotizaciones con yfinance, analiza información con Ollama o, opcionalmente, Google Gemini, genera reportes Markdown y ofrece un dashboard web. Incluye un lanzador para Windows (`lanzar-bot.bat`) y otro para Linux (`launch.sh`). El dashboard también contempla una integración opcional con una aplicación externa de trading en el puerto 18767.
+
+El objetivo normal del sistema es investigar y mostrar información: no debe realizar operaciones financieras reales ni enviar instrucciones a brokers.
+
+## Cómo trabajar
+
+1. Inspecciona primero la estructura, documentación, dependencias, historial y estado de Git. Lee los archivos relevantes antes de modificarlos.
+2. Conserva los cambios preexistentes del usuario. No sobrescribas ni reviertas cambios que no hayas hecho tú.
+3. Sigue el flujo real de ejecución desde los lanzadores y `main.py` hasta la ingesta, evaluación con IA, generación de reportes y dashboard. Comprueba también cómo se comunican las partes entre sí.
+4. Busca defectos demostrables, no cambios estéticos ni refactorizaciones especulativas. Para cada problema, intenta identificar la causa raíz y reproducirlo con una prueba, un comando o una explicación verificable.
+5. Corrige los problemas encontrados con cambios puntuales, coherentes con el estilo y la arquitectura existentes. No cambies la funcionalidad esperada sin justificarlo.
+6. No hagas commits, no publiques cambios, no elimines datos del proyecto y no ejecutes acciones destructivas. No imprimas ni compartas secretos. No ejecutes operaciones financieras, órdenes de trading ni llamadas que puedan generar cargos. Para servicios externos, usa mocks o pruebas seguras cuando sea posible.
+
+## Áreas que debes auditar
+
+- **Instalación y dependencias:** compatibilidad entre versiones de Python y paquetes; dependencias directas e indirectas; instalación limpia en entorno virtual; consistencia de `requirements.txt`; importaciones y arranque sin dependencias ausentes.
+- **Operatividad multiplataforma:** rutas y directorio de trabajo; uso de Python, entornos virtuales, variables de entorno, codificación de consola, puertos, navegador y señales de cierre en Windows y Linux. Comprueba que los lanzadores fallen con mensajes útiles y que no dependan de rutas absolutas de la computadora del autor.
+- **Integraciones:** formatos y errores de feeds RSS; respuestas incompletas o fallidas de yfinance; Ollama no instalado, detenido o sin el modelo configurado; errores y configuración opcional de Gemini; timeouts, respuestas inválidas y degradación controlada. Distingue con claridad una función opcional de una dependencia necesaria.
+- **Pipeline y lógica de negocio:** filtros, deduplicación, categorías, directivas personalizadas, tickers, cálculos y límites. Valida los datos externos antes de usarlos y comprueba que los errores no generen resultados ficticios presentados como reales.
+- **Modelos y reportes:** validación de Pydantic; campos opcionales; datos ausentes o mal formados; formato, nombres, codificación, rutas, fechas y lectura de reportes generados. Mantén coherentes el reporte, el terminal y el dashboard.
+- **Dashboard y API:** rutas, métodos HTTP, parámetros, tipos de contenido, códigos de respuesta, JSON inválido, errores durante los escaneos, archivos estáticos, manejo de puertos ocupados, cierre del servidor y coherencia entre frontend y backend.
+- **Seguridad y privacidad:** manejo de claves y `.env`; exposición de servicios y CORS; acceso a archivos y rutas de reportes; entradas no confiables; datos o secretos en logs; límites de peticiones. Examina especialmente la integración opcional con el servicio externo de trading, pero no la invoques ni envíes solicitudes reales.
+- **Calidad y pruebas:** casos límite, pruebas ausentes para defectos encontrados, confiabilidad de las pruebas y coherencia entre README, configuración y comportamiento actual.
+
+## Verificación requerida
+
+- Ejecuta primero las pruebas existentes y registra el resultado inicial.
+- Después de las correcciones, ejecuta las pruebas pertinentes y las comprobaciones de dependencias, compilación, lint o tipos que ya existan en el repositorio. No añadas herramientas innecesarias.
+- Si una comprobación requiere Internet, credenciales, un servicio externo o una aplicación que no está disponible, no inventes un resultado ni expongas secretos: indica la limitación y usa mocks o una prueba local segura cuando sea posible.
+- Prueba las rutas normales y los fallos previsibles: dependencias ausentes, servicio Ollama no disponible, datos externos vacíos o mal formados, puerto ocupado, petición inválida y ausencia de reportes.
+- Revisa el diff final para confirmar que no haya cambios accidentales, secretos, archivos generados ni modificaciones ajenas a la tarea.
+
+## Criterios de éxito
+
+Considera resuelto un problema solo si existe evidencia verificable: una prueba que pasa, un comando que funciona o una causa demostrada que ya no se reproduce. No afirmes que el proyecto está “libre de errores”; describe con precisión qué revisaste, qué arreglaste y qué quedó fuera de verificación.
+
+## Informe final
+
+Al terminar, responde en español con:
+1. Hallazgos principales, ordenados por severidad: crítico, alto, medio y bajo.
+2. Reparaciones realizadas, con archivos involucrados y explicación breve.
+3. Comandos de pruebas/verificación ejecutados y sus resultados.
+4. Problemas no resueltos o verificaciones bloqueadas, explicando por qué.
+5. Cualquier riesgo o limitación restante.
+
+No hagas un commit salvo que se te solicite expresamente.
+
+resultado
+
+1. Hallazgos principales
+No encontré fallos críticos. El repositorio auditado no es exactamente el “Monitor del Mercado” descrito: es una aplicación de análisis y simulación, con feeds RSS y cotizaciones en el backend, pero sin generación de reportes Markdown ni ejecución conectada a brokers. No encontré llamadas para colocar órdenes financieras; el adaptador de paper trading no está conectado al API activo.
+
+Alto
+XSS en el radar macro: texto de noticias o del modelo se insertaba en atributos onclick con escape insuficiente. Corregido usando listeners registrados desde el DOM, sin interpolar datos externos en manejadores inline, en app.js.
+Puente macro sin autenticación: /api/macro/inject aceptaba escrituras sin verificar token ni restringir el origen al loopback. Ahora valida acceso local/token y estructura, longitud, confianza y timestamp con un modelo Pydantic en main.py.
+Lanzadores con riesgo de detener procesos ajenos: el lanzador Linux usaba una ruta absoluta y pkill; el de Windows mataba cualquier proceso que ocupara los puertos. Ahora usan la carpeta del proyecto, comprueban puertos y solo terminan los procesos que el lanzador Linux inicia: lanzar_bot.sh y lanzar_bot.bat.
+Medio
+Auto-promoción de alertas rota: faltaba resolver datetime/el parser antes de comparar fechas, y RadarInbox descartaba timestamps con zona horaria. Corregido, incluidos timestamps ISO con Z, en main.py y radar_inbox.py.
+Bloqueo concurrente de Ollama vulnerable a liberación ajena: la purga liberaba un lock que podía pertenecer a otra inferencia. La purga ya no lo libera; cada operación libera el suyo en su propio finally, en main.py.
+Datos de mercado ausentes o respuesta Gemini inesperada: el radar podía invocar el modelo sin titulares y Gemini podía devolver un objeto cuando el frontend esperaba una lista. Ahora la ausencia de titulares devuelve un estado explícito sin inferir, y los objetos Gemini se normalizan a lista: main.py.
+Autenticación inconsistente entre backend y dashboard: varias rutas protegidas no enviaban X-API-Token, y no había control visible para configurarlo en el navegador. Añadí encabezados compartidos y un campo local de token en app.js y index.html.
+Dependencias: requests se usaba directamente, Pydantic no tenía el mínimo compatible con model_dump, y Gemini era obligatorio pese a ser opcional. Separé las dependencias base, opcionales y de test en requirements.txt, requirements-gemini.txt y requirements-dev.txt.
+Bajo
+Las pruebas preexistentes son scripts que consultan feeds o mercados al importarse y no forman una suite aislada fiable. No las ejecuté contra servicios reales; añadí pruebas mockeadas en test_regressions.py.
+2. Reparaciones y documentación
+Además de los cambios anteriores, actualicé README.md y CONTEXTO.md para aclarar que las operaciones son simuladas y no se envían órdenes. Añadí la configuración opcional del token a backend/.env.example.
+
+3. Verificaciones ejecutadas
+Inicial: python3 -m pytest -q y venv/bin/python -m pytest -q no pudieron arrancar: faltaba pytest. No ejecuté los tests/scripts antiguos porque realizan llamadas externas al importarse.
+Final: venv/bin/python -m pytest -q tests/test_regressions.py → 17 passed. Incluye análisis con cotizaciones simuladas, datos mal formados, RSS vacío, Ollama no disponible, token ausente/presente y timestamps.
+Instalación en un entorno virtual limpio temporal desde backend/requirements.txt → completada; el backend importa aun con Gemini bloqueado como dependencia opcional. Eliminé el entorno temporal al terminar.
+venv/bin/python -m pip check y resolución pip install --dry-run --no-index -r backend/requirements.txt → sin conflictos.
+python -m compileall, bash -n lanzar_bot.sh, node --check frontend/js/app.js y git diff --check → correctos.
+scripts/check_dom_ids.py enumeró ocho IDs no presentes literalmente en HTML; comprobé que son elementos creados dinámicamente o una referencia opcional con fallback.
+Puerto ocupado: no ejecuté el lanzador porque el puerto 18087 ya estaba ocupado. No inspeccioné ni detuve el proceso. El lanzador Windows no pudo ejecutarse en este entorno Linux.
+4. Límites y riesgos restantes
+No contacté Binance, Yahoo Finance, RSS, Ollama, Gemini ni un broker; sus respuestas se probaron con mocks. La instalación opcional de Gemini y el comportamiento en Windows quedan sin validación de ejecución real. La aplicación depende de esos servicios para datos e inferencia cuando el usuario los solicita.
+
+Durante la auditoría apareció el archivo no rastreado auditoria_1_vs.txt; no lo abrí ni modifiqué. No hice commit.
+
+

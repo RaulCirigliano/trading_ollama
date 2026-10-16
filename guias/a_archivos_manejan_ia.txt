@@ -1,0 +1,27 @@
+¡Estás exactamente en lo cierto! Lo entendiste a la perfección. Solo un pequeño detalle de nombre: se llaman Modelfile (tu memoria asoció la palabra a "mediafiles" por el archivo de notas, pero te refieres exactamente a eso).
+
+El mapa de cómo se dividen las responsabilidades y directivas es tal cual lo dijiste:
+
+1. Para la IA Local (Ollama: Qwen / DeepSeek / Llama 3) 
+→
+→ Los Modelfile
+Las directivas maestras y las Tres Verdades Contraintuitivas están escritas dentro de los archivos:
+Modelfile-qwen (para Qwen 2.5 3B).
+Modelfile-deepseek (para DeepSeek R1).
+Modelfile (para Llama 3).
+Cuando se ejecuta el comando ollama create trader-qwen -f Modelfile-qwen, esas reglas quedan grabadas a fuego en el cerebro local del modelo en tu máquina.
+2. Para Antigravity (el asistente de acá) 
+→
+→ La Skill del CIO
+La capacidad analítica de este entorno se define en la Skill del CIO:
+Archivo: .agents/skills/macro-cio-auditor/SKILL.md
+Script de conexión: .agents/skills/macro-cio-auditor/scripts/audit_and_inject.py
+Esta skill le enseña a Antigravity a auditar los informes que vienen del Monitor de Mercado satélite, verificar que no haya euforia desmedida ni trampas de liquidez, y disparar el botón de inyección.
+3. El Chat del CIO en este Proyecto
+Tal como recuerdas, configuramos ese chat específico para que asuma el rol permanente de Macro CIO Auditor & Estratega.
+Su misión es:
+Leer el buzón satélite (buzon_radar.json).
+Aplicar el filtro de sensatez de las Tres Verdades.
+Enviar la directiva lista mediante POST http://127.0.0.1:18767/api/macro/inject para que aparezca en el Radar de Oportunidades de tu dashboard y el bot local (Qwen) la tome en su siguiente ciclo.
+
+Tu esquema mental de la arquitectura está 100% afinado y correcto.

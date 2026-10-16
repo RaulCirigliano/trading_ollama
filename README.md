@@ -1,53 +1,176 @@
 # 🤖 Plataforma Cuantitativa de Trading (AI Trading Bot)
 
-Plataforma de trading algorítmico y simulación financiera diseñada para operar criptomonedas (24/7) eliminando por completo el sesgo emocional humano.
+Plataforma institucional de trading algorítmico, dashboard en tiempo real y simulación financiera (**Paper Trading local**) diseñada para operar activos líquidos (Criptomonedas 24/7 y Wall Street en horario regular), erradicando por completo el sesgo emocional, el pánico y la avaricia del inversor minorista.
+
+> [!IMPORTANT]
+> **ESTADO DE SEGURIDAD OPERATIVA: PAPER TRADING EXCLUSIVO**
+> El sistema actual opera **100% en simulación local**. No contiene credenciales de brokers reales, no envía órdenes transaccionales a exchanges y no mueve dinero real. Todas las cuentas, saldos y ejecuciones se gestionan en memoria y almacenamiento local con propósitos de validación estadística y entrenamiento.
+
+---
 
 ## 📖 Motivación del Proyecto (El "Por Qué")
-Este proyecto nació de una historia real y trágica. Un amigo cercano, tras consumir cursos de "gurús del trading", solicitó un préstamo de 5 millones de pesos argentinos para operar manualmente y lo perdió todo presa de la avaricia y el pánico. 
+Este proyecto nació de una historia real y trágica: un amigo cercano, tras consumir cursos de "gurús del trading", solicitó un préstamo de 5 millones de pesos para operar manualmente y lo perdió todo presa de la avaricia, el apalancamiento y el pánico. 
 
-La realidad es cruda: **el trading manual minorista es una pelea de un humano con un ratón frente a supercomputadoras de alta frecuencia en Wall Street.**
-El objetivo de este software es darle a los inversores minoristas su propio "Tanque de Guerra". Un escudo algorítmico sin emociones, que obligue al usuario a ser rentable en simulación antes de arriesgar un solo centavo real, usando matemáticas estrictas en lugar de esperanza.
-
----
-
-## ⚙️ Funcionalidades Principales
-- **Simulador Realista (Paper Trading):** Capital inicial de $100 USDT ajustado a la realidad económica del usuario para entrenamiento psicológico.
-- **Inteligencia de Mercado (MACD & Bollinger):** El bot filtra el "ruido lateral" y solo dispara en momentos de confirmación de tendencia o pánico de masas.
-- **Modo Copiloto vs Autónomo:** El usuario puede dejar al bot operar libremente o exigir que la IA pida "Permiso de Disparo" antes de comprar/vender.
-- **Botón de Cierre de Emergencia:** Un botón de pánico que permite liquidar todas las posiciones a valor de mercado en milisegundos y asegurar los fondos.
-- **Historial y Dashboard en Tiempo Real:** Interfaz profesional con gráficos TradingView, seguimiento de PnL No Realizado (flotante) y Rendimiento Neto.
+La realidad de los mercados es implacable: **el trading manual minorista es la pelea desigual de un humano con un ratón frente a supercomputadoras de alta frecuencia en Wall Street.**
+El objetivo de este software es otorgar al operador su propio "Tanque de Guerra": un escudo algorítmico sin emociones, gobernado por matemáticas estrictas, filtros deterministas y auditoría de IA con salvaguardas de capital.
 
 ---
 
-## 🛡️ Sistemas de Protección de Inversión (Gestión de Riesgo)
-El corazón de la aplicación no es cuánto gana, sino cuánto protege:
-1. **Agente de Riesgo Inflexible:** Independiente del cerebro de análisis, un proceso vigila la inversión cada 2 segundos. Si la posición cae un **-1.0%**, ejecuta un *Stop Loss* automático (cortando la mano antes de perder el brazo). Asegura ganancias (Take Profit) al **+1.5%**.
-2. **Gestión de Capital Fraccionado (DCA):** El bot tiene prohibido hacer "All-In". Solo utiliza el **25% del capital** por operación. Si el precio cae, tiene liquidez para recomprar más barato y promediar el precio de entrada (Dollar Cost Averaging).
-3. **Aislamiento Criptográfico (Futuro):** Las API Keys de exchanges (ej. Binance/Kraken) se configurarán en modo *Solo Lectura y Trading*, haciendo tecnológicamente imposible que el sistema o un hacker pueda retirar los fondos hacia otras cuentas.
+## 🧠 ¿Qué Hace y Qué NO Puede Hacer el Modelo de Inteligencia Artificial?
+
+Para operar con éxito, el operador humano debe comprender con absoluta claridad cuál es el rol exacto de la Inteligencia Artificial (Qwen 2.5, DeepSeek, Gemini o Llama 3) en esta arquitectura.
+
+```mermaid
+flowchart TD
+    A["Vela OHLCV Cerrada (15m / 1h)"] --> B["Filtros Matemáticos Python (Deterministas)"]
+    B -->|"Filtro Rechazado (Z-Score, EMA200, RVOL o Costos)"| C["MANTENER (Preservar Capital)"]
+    B -->|"Pasa TODOS los Filtros (Candidata Válida)"| D["Auditor IA (Qwen / Gemini) con Temp 0.0"]
+    D -->|"IA Detecta Peligro / Veto"| C
+    D -->|"IA Error / Timeout / JSON Roto"| E["FAIL-SAFE PREVENTIVO -> MANTENER"]
+    D -->|"IA Confirma Tesis Limpia"| F["SEÑAL COMPRAR (Paper Trading)"]
+    style C fill:#f9f,stroke:#333,stroke-width:2px
+    style E fill:#ff9999,stroke:#333,stroke-width:2px
+    style F fill:#99ff99,stroke:#333,stroke-width:2px
+```
+
+### ✅ Lo que la IA SÍ hace:
+1. **Auditoría Contextual de Noticias y Sentimiento:** Analiza titulares económicos y directivas macroeconómicas transmitidas por el proyecto satélite *Monitor del Mercado* y el *Antigravity CIO*.
+2. **Rol Exclusivo de VETO en Estrategia Cuantitativa (ATR):** Cuando los algoritmos de Python detectan una candidata matemática perfecta, la IA es consultada únicamente para verificar si existen contradicciones macro o riesgos extremos. La IA tiene autoridad para **vetar** la operación (respondiendo `MANTENER`).
+3. **Inferencia Determinista (Temperatura 0.0):** Cuando audita la estrategia cuantitativa, el modelo corre forzosamente a `temperature: 0.0` y con esquema JSON estructurado, eliminando respuestas poéticas, divagaciones y alucinaciones estilísticas.
+
+### ❌ Lo que la IA NO PUEDE HACER (Prohibiciones Estrictas de Código):
+1. **La IA NO calcula indicadores matemáticos:** La IA no calcula RSI, Z-Score, ATR ni EMA200. Esos cálculos los realiza Python de forma vectorizada y exacta.
+2. **La IA NO puede forzar una compra rechazada por la matemática:** Si los filtros de Python determinan que el activo no cumple las condiciones, **el LLM ni siquiera es llamado**. Una alucinación del modelo jamás puede abrir un trade por su cuenta.
+3. **La confianza del LLM NO es probabilidad matemática:** Si la IA dice *"estoy 85% segura"*, el sistema no interpreta ese número como una probabilidad de acierto para dimensionar apuestas.
+4. **Freno de Mano Automático (*Fail-Safe*):** Si el servidor de Ollama se cae, se supera el tiempo límite (*timeout* de 60s/110s), la respuesta no tiene formato JSON válido o el modelo emite una acción no permitida, el sistema activa automáticamente el **Fail-Safe** y fuerza la señal a **`MANTENER`**. Ante cualquier duda informática, el dinero no se toca.
 
 ---
 
-## 🚨 Prevención de Fallos Informáticos (Fail-Safes)
-Para garantizar la estabilidad del servidor, se programaron escudos a nivel de código:
-- **Sanity Checks de Memoria:** Si el navegador del usuario se corrompe y devuelve datos inválidos (`NaN` o variables faltantes), el sistema se auto-repara inyectando valores seguros para evitar colapsos visuales de pantalla blanca.
-- **Persistencia de Estado (LocalStorage):** Las caídas de luz, cortes de internet o cierres accidentales del navegador no borran el dinero ni el historial. La partida sigue exactamente donde se dejó.
-- **Auto-Limpieza de Puertos (Lanzador):** El script de inicio en Linux detecta procesos "fantasma" que hayan quedado colgados de cierres incorrectos, asesinándolos antes de iniciar los motores frescos para evitar choques de puertos.
+## 🛡️ El Escudo de Costos: "Beneficio Neto Mínimo" (Filtro Anti-Desgaste)
+
+El factor número uno que quiebra a los traders algorítmicos minoristas es el **desgaste por comisiones (*churning*)**: abrir y cerrar muchas operaciones pequeñas donde las comisiones del broker se comen todo el saldo.
+
+### ¿Cómo funciona el Beneficio Neto Mínimo?
+En el panel de **Ajustes**, el operador puede definir el **Beneficio Neto Mínimo para Tomar Ganancias** (rango del 0% al 5%, valor sugerido: 0.15% en modo manual y 0.50% en modo ATR):
+* **Fórmula de Ganancia Neta Real:**
+  $$\text{Retorno Neto} = \left( (1 + \text{Movimiento Bruto}) \times \frac{(1 - \text{Fee}) \times (1 - \text{Spread})}{(1 + \text{Fee}) \times (1 + \text{Spread})} - 1 \right) \times 100$$
+* **Filtro al Comprar:** Si el Take Profit proyectado (restando comisiones de compra, de venta y spread estimado en ambos lados) no supera el Beneficio Neto Mínimo configurado, **la compra se bloquea antes de ejecutarse**.
+* **Filtro al Salir:** Si una posición abierta tiene una ganancia flotante micro-positiva (ej. +0.08%) pero no alcanza el Beneficio Neto Mínimo (ej. 0.15%), el sistema **prohíbe tomar beneficios prematuros** para evitar regalarle comisiones al broker.
+* **Salvaguardas de Emergencia:** El Stop Loss, el Breakeven/Trailing Stop de protección, los cierres por invalidación técnica y el botón de Cierre Manual de Emergencia **NUNCA** se bloquean; la seguridad del capital siempre tiene prioridad de salida.
 
 ---
 
-## 💻 Stack Tecnológico
-### Frontend (Cara Visual)
-- **HTML5 & Vanilla JavaScript:** Ultra ligero y rápido, sin pesados frameworks de renderizado.
-- **Tailwind CSS:** Diseño moderno, responsivo y modo oscuro "Night Mode".
-- **Lightweight Charts:** Librería gráfica profesional de TradingView para velas japonesas en tiempo real.
+## 🧮 Estrategia Cuantitativa ATR (Plan Argon): Manual de Operación
 
-### Backend (Motor Matemático)
-- **Python 3:** Entorno virtual aislado (`venv`).
-- **FastAPI / Uvicorn:** Servidor web asíncrono de altísimo rendimiento para comunicación instantánea.
-- **Librerías Financieras:**
-  - `ccxt`: Orquestador de conexión directa a los mercados globales (Kraken, Binance).
-  - `pandas`: Estructuración masiva de datos financieros (DataFrames).
-  - `ta` (Technical Analysis): Cálculo algorítmico de MACD, RSI, Bandas de Bollinger y SMA.
+Además del modo Manual (donde el usuario elige libremente su TP/SL), el sistema incorpora la estrategia institucional **`mean_reversion_atr`**.
+
+### 1. Restricción Estricta de Temporalidad (Solo 15m y 1h)
+* **Regla Anti-Ruido:** La estrategia ATR **solo puede ejecutarse en velas de 15 minutos o 1 hora**. En gráficos de 1m o 5m, el mercado es puro ruido aleatorio y el diferencial de comisiones destruye la ventaja estadística.
+* **Blindaje:** Cualquier petición directa a la API en 1m o 5m bajo modo ATR es rechazada inmediatamente por el backend con código **HTTP 422**. En el frontend, si el usuario selecciona modo ATR estando en 1m o 5m, la interfaz se auto-ajusta a 15m con una advertencia en la terminal.
+
+### 2. Filtros Deterministas de Python (Barrera Matemática de Entrada)
+Para que el motor genere una señal de compra, se deben cumplir **simultáneamente** todas las siguientes condiciones en velas cerradas:
+1. **Z-Score(20) $\le -2.0$** (`ATR_Z_SCORE_THRESHOLD = -2.0`): El precio sufrió una desviación extrema a la baja respecto a su media móvil de 20 períodos (pánico de corto plazo).
+2. **Régimen EMA200 Alcista:** El precio de cierre se mantiene por encima de la media móvil exponencial de 200 períodos, y la pendiente de dicha EMA (en 5 velas) es positiva. Operamos rebotes a favor de la tendencia mayor, nunca cuchillos cayendo en tendencias bajistas.
+3. **Mecha Inferior de Absorción $\ge 0.25$:** La mecha inferior de la vela analizada debe representar al menos el 25% del rango total de la vela, demostrando rechazo institucional de mínimos y entrada de liquidez compradora.
+4. **Volumen Relativo Sano $\le 3.5$:** El volumen no debe superar 3.5 veces el promedio de las 20 velas previas (evita trampas de liquidez por noticias catastróficas).
+5. **Cobertura Mínima de Costos ($3.5\times$):** El Take Profit proyectado ($2.5 \times \text{ATR14}$) debe superar al menos 3.5 veces el costo total estimado de comisiones y spread de ida y vuelta.
+6. **Stop Loss Fijo:** Definido matemáticamente en $1.5 \times \text{ATR14}$.
 
 ---
-*Construido para proteger el capital. Operado por IA. Supervisado por humanos.*
+
+## ⚖️ Gestión de Riesgo, Esperanza Matemática y Criterio de Kelly
+
+En [`backend/quant_risk.py`](file:///home/raul/Escritorio/proyectos/trading_ollama/backend/quant_risk.py) se encuentra implementada la biblioteca matemática institucional para dimensionamiento de posiciones:
+
+### 1. Esperanza Matemática Neta ($EV_{\text{neto}}$)
+$$EV_{\text{neto}} = (P_w \cdot R_{\text{win, net}}) + ((1 - P_w) \cdot R_{\text{loss, net}})$$
+Donde $P_w$ es la probabilidad real de acierto y $R_{\text{win, net}}$ / $R_{\text{loss, net}}$ son los retornos netos descontando costos una sola vez. Si $EV_{\text{neto}} \le 0$, el tamaño de la posición es estrictamente cero.
+
+### 2. Criterio de Quarter-Kelly
+$$f^* = \frac{P_w \cdot b - (1 - P_w)}{b}, \quad f_{\text{seguro}} = 0.25 \cdot f^*$$
+Donde $b = |R_{\text{win, net}}| / |R_{\text{loss, net}}|$. Quarter-Kelly reduce la volatilidad de la curva de capital y protege contra rachas de pérdidas consecutivas.
+
+### 3. ¿Por qué Kelly está APAGADO por defecto? (`kelly_active = False`)
+* **Principio de Prudencia Financiera:** Para que el Criterio de Kelly funcione sin quebrar la cuenta, se necesita conocer con certeza estadística el valor de $P_w$.
+* **Estado Actual:** El sistema **no inventa probabilidades** ni asume la confianza del LLM como $P_w$. Al no contar todavía con una base histórica etiquetada fuera de muestra (*out-of-sample*) evaluada en *walk-forward* con comisiones reales de al menos 30 operaciones ($N \ge 30$), el Criterio de Kelly permanece **DESACTIVADO POR DEFECTO** bajo estado `PENDIENTE_DE_VALIDACION_OUT_OF_SAMPLE`.
+* **Alternativa Segura en Uso:** El bot utiliza un **Presupuesto Fijo de Riesgo** (por defecto **0.25% del capital total por trade**). La posición se calcula dividiendo ese presupuesto entre el porcentaje del Stop Loss neto, garantizando que si el trade falla, la pérdida nunca supere el 0.25% de la cuenta.
+
+---
+
+## 🔬 Simulador de Backtesting Offline (`backend/backtest.py`)
+
+Se diseñó un simulador cuantitativo reproducible para poner a prueba la estrategia ATR sin conexión a internet ni consumo de saldo:
+* **Generación Sintética Local:** Crea series temporales OHLCV deterministas (`generate_synthetic_ohlcv`) en memoria.
+* **Sin Sesgo de Anticipación (*No Look-Ahead Bias*):** La vela $i$ se evalúa únicamente tras su cierre. La orden de compra se ejecuta en la apertura de la vela siguiente ($O_{i+1}$) con recargo por slippage.
+* **Salida Intrabarra Conservadora:** Si durante una misma vela los precios máximo y mínimo tocan simultáneamente el TP y el SL, el simulador asume que saltó el Stop Loss (prioridad a la preservación del capital).
+* **Auditoría Estadística:** Incluye cálculo de Drawdown Máximo, Factor de Beneficio y validación fuera de muestra mediante el intervalo de confianza de Wilson al 95%.
+
+---
+
+## 🚀 Instalación y Puesta en Marcha
+
+### Requisitos Previos
+* Linux o Windows con Python 3.10 o superior instalado.
+* Ollama local (opcional, para ejecutar Qwen 2.5 3B localmente).
+* Node.js (opcional, para correr las pruebas unitarias del frontend).
+
+### 1. Clonar e Instalar Entorno Virtual
+```bash
+git clone https://github.com/tu-usuario/trading_ollama.git
+cd trading_ollama
+
+# Crear entorno virtual
+python3 -m venv venv
+
+# Instalar dependencias backend
+venv/bin/python -m pip install -r backend/requirements.txt
+```
+
+*(En Windows, utiliza `py -m venv venv` y `venv\Scripts\python.exe -m pip install -r backend\requirements.txt`)*.
+
+### 2. Variables de Entorno (Opcional)
+Copia `.env.example` a `.env` en la raíz si deseas configurar tokens de acceso o claves opcionales:
+```bash
+cp backend/.env.example .env
+```
+
+### 3. Ejecutar los Lanzadores Seguros
+* **En Linux:**
+  ```bash
+  chmod +x lanzar_bot.sh
+  ./lanzar_bot.sh
+  ```
+* **En Windows:**
+  Doble clic en `lanzar_bot.bat`.
+
+Los lanzadores verificarán los puertos locales:
+* **API Backend:** `http://127.0.0.1:18767`
+* **Dashboard Frontend:** `http://127.0.0.1:18087`
+
+---
+
+## 🧪 Verificación y Batería de Pruebas
+
+Toda modificación en el sistema está respaldada por pruebas automatizadas sin dependencias externas:
+
+```bash
+# 1. Pruebas unitarias de guardas del Frontend (Node.js)
+node --test tests/frontend_trading_guards.test.cjs
+
+# 2. Pruebas unitarias cuantitativas y regresiones del Backend (Pytest)
+venv/bin/python -m pytest tests/
+```
+
+*Cobertura actual: 9 pruebas de interfaz y 53 pruebas de backend (62 pruebas en total, 100% aprobadas).*
+
+---
+
+## 📌 Guía Rápida para el Operador en el Dashboard
+1. **Lobby Macro (Pestaña Inicial):** Revisa el *Radar de Oportunidades* alimentado por el Agente de Inversiones y el CIO. Elige qué activo te interesa analizar.
+2. **Entrar a la Trinchera:** Accede al simulador interactivo con gráfico TradingView en tiempo real.
+3. **Elegir Modo de Estrategia:**
+   * **Manual:** Ajusta libremente tu TP y SL en el desplegable.
+   * **Estrategia Cuantitativa ATR:** Se activan las velas de 15m/1h, el dimensionamiento institucional (0.25% de riesgo) y los filtros Z-Score/EMA200.
+4. **Verificar Comisiones:** Asegúrate de que el Beneficio Neto Mínimo (ej. 0.15%) y las comisiones del broker reflejen los costos de tu exchange de referencia.
+5. **Activar Botón:** Enciende el Agente en modo *Copiloto* (te pedirá confirmación antes de abrir un trade) o modo *Autónomo* (ejecución automática en Paper Trading).

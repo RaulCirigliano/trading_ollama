@@ -3,7 +3,7 @@ import re
 import json
 import requests
 from collections import defaultdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
 # Cargar variables de entorno al importar el módulo

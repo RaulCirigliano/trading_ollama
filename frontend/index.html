@@ -447,7 +447,9 @@
                             <option value="1m">1 Minuto (Ruido / Miedoso)</option>
                             <option value="5m">5 Minutos (Equilibrado)</option>
                             <option value="15m" selected>15 Minutos (Tendencias seguras)</option>
+                            <option value="1h">1 Hora (Swing / Argon ATR)</option>
                         </select>
+
                     </div>
 
                     <div>
@@ -459,18 +461,41 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-xs text-gray-400 mb-1">Take Profit / Stop Loss</label>
-                        <select id="tpSlSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
-                            <option value="1.5|-1.0">Ganar +1.5% | Perder -1.0% (Rápido)</option>
-                            <option value="3.0|-2.0" selected>Ganar +3.0% | Perder -2.0% (Normal)</option>
-                            <option value="4.0|-2.0">Ganar +4.0% | Perder -2.0% (Swing)</option>
+                        <label for="strategyModeSelect" class="block text-xs text-gray-400 mb-1">Estrategia de trading</label>
+                        <select id="strategyModeSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="manual" selected>Manual: TP/SL bruto del desplegable</option>
+                            <option value="mean_reversion_atr">Cuantitativa: reversión a la media + ATR (Paper Trading)</option>
                         </select>
+                        <p class="text-[10px] text-gray-500 mt-1">La estrategia ATR calcula TP=2.5×ATR y SL=1.5×ATR; requiere Z≤−2, régimen EMA200, absorción y costos cubiertos. Python filtra primero; la IA seleccionada solo puede vetar.</p>
+                    </div>
+                    <div id="manualTpSlSettings">
+                        <label class="block text-xs text-gray-400 mb-1">Movimiento objetivo bruto / Stop Loss (fuente única de TP/SL)</label>
+                        <select id="tpSlSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="1.5|-1.0">Precio +1.5% / -1.0% (Rápido)</option>
+                            <option value="3.0|-2.0" selected>Precio +3.0% / -2.0% (Normal)</option>
+                            <option value="4.0|-2.0">Precio +4.0% / -2.0% (Swing)</option>
+                        </select>
+                        <p class="text-[10px] text-gray-500 mt-1">Estos valores fijan el TP/SL bruto de las posiciones en modo Manual.</p>
+                    </div>
+                    <div id="quantRiskBudgetSettings" class="hidden">
+                        <label for="quantRiskBudgetSelect" class="block text-xs text-gray-400 mb-1">Pérdida máxima planeada por operación (% del capital)</label>
+                        <select id="quantRiskBudgetSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                            <option value="0.25" selected>0.25% (Conservador)</option>
+                            <option value="0.50">0.50% (Moderado)</option>
+                            <option value="1.00">1.00% (Alto)</option>
+                        </select>
+                        <p class="text-[10px] text-gray-500 mt-1">El tamaño se calcula desde la distancia al Stop ATR y queda limitado por el capital asignable. No usa Kelly ni la confianza del modelo.</p>
+                    </div>
+                    <div>
+                        <label for="minProfitPctInput" class="block text-xs text-gray-400 mb-1">Beneficio neto mínimo para tomar ganancias (%)</label>
+                        <input type="number" id="minProfitPctInput" value="0.15" step="0.05" min="0" max="5" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                        <p class="text-[10px] text-gray-500 mt-1">Se exige sobre el PnL neto tras comisión y spread para ventas de estrategia. No bloquea Stop Loss, breakeven, trailing ni cierre manual. Se fija al abrir cada posición.</p>
                     </div>
 
                     <div>
                         <div class="flex justify-between items-center mb-1">
                             <label class="block text-xs text-gray-400">Comisión Broker (% por orden)</label>
-                            <span id="roundTripBadge" class="text-[10px] bg-yellow-500/10 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/30 font-mono">Round-Trip: 0.20%</span>
+                            <span id="roundTripBadge" class="text-[10px] bg-yellow-500/10 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-500/30 font-mono">Costos ida/vuelta: 0.30%</span>
                         </div>
                         <select id="brokerFeeSelect" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
                             <option value="0.02">0.02% (Acciones / ETFs EE.UU. - IBKR / Alpaca)</option>
@@ -485,6 +510,11 @@
                             <input type="number" id="customFeeInput" step="0.01" min="0" max="10" placeholder="Ej: 0.15" class="bg-gray-900 text-white w-full rounded p-1 text-xs border border-gray-700">
                             <span class="text-xs text-gray-400">%</span>
                         </div>
+                    </div>
+                    <div>
+                        <label for="spreadInput" class="block text-xs text-gray-400 mb-1">Spread estimado (% por lado; usado si no hay bid/ask)</label>
+                        <input type="number" id="spreadInput" value="0.05" step="0.01" min="0" max="5" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700">
+                        <p class="text-[10px] text-gray-500 mt-1">Estimación configurable para simulación; el spread real varía por activo y liquidez.</p>
                     </div>
                                         <div>
                         <label class="block text-xs text-gray-400 mb-1">Horario de Operación</label>
@@ -520,6 +550,7 @@
                             <option value="auto" selected>Trading Autónomo (Ejecutar directo)</option>
                             <option value="smart">🧠 Modo Inteligente (Auto-Ruteo Multi-Activo)</option>
                         </select>
+                        <p class="text-[10px] text-gray-500 mt-1">El Modo Inteligente autoriza el auto-ruteo solo para directivas positivas, ≥80% de confianza y vigentes (24 h); no sustituye la señal del motor.</p>
                     </div>
 
                     <div>
@@ -585,6 +616,14 @@
                             <span>Totalmente gratuita, dura toda la sesión.</span>
                             <span id="apiKeyStatus" class="text-green-400 font-bold hidden">¡Guardada!</span>
                         </p>
+                    </div>
+                    <div class="mt-2 border-t border-gray-700 pt-3">
+                        <label for="appTokenInput" class="block text-xs text-gray-400 mb-1">Token local del backend (opcional)</label>
+                        <div class="flex space-x-2">
+                            <input type="password" id="appTokenInput" autocomplete="off" placeholder="APP_SECRET_TOKEN / APP_TOKEN" class="bg-gray-900 text-white w-full rounded p-1.5 text-sm border border-gray-700 outline-none focus:border-blue-500">
+                            <button id="saveAppTokenBtn" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 text-sm rounded font-bold transition whitespace-nowrap">Guardar Token</button>
+                        </div>
+                        <p class="text-[10px] text-gray-500 mt-1">Se guarda solo en la sesión de esta pestaña. Déjalo vacío para borrarlo.</p>
                     </div>
                 </div>
             </div>
@@ -674,23 +713,19 @@
                     </div>
                     <!-- Agente Cuantitativo -->
                     <div class="flex justify-between items-start bg-gray-700 p-2 rounded">
-                        <div class="pr-2">
+                        <div>
                             <p class="text-sm font-semibold text-blue-400">📊 Agente Cuantitativo (Quants)</p>
-                            <p class="text-[10px] text-gray-300 mt-1 leading-tight">Analiza el gráfico en tiempo real evaluando indicadores matemáticos como el RSI (sobrecompra/sobreventa), Medias Móviles y VWAP para buscar patrones rentables.</p>
+                            <p class="text-[10px] text-gray-300 mt-1 leading-tight">El motor seleccionado arriba usa indicadores técnicos. El modelo matemático local decide por reglas; los motores IA reciben esos indicadores como contexto. No es un interruptor independiente.</p>
                         </div>
-                        <label class="relative inline-flex items-center cursor-pointer mt-1">
-                            <input type="checkbox" checked class="sr-only peer">
-                            <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
-                        </label>
                     </div>
 
                     <!-- Agente Sentimiento -->
                     <div class="flex justify-between items-start bg-gray-700 p-2 rounded">
                         <div class="pr-2">
                             <p class="text-sm font-semibold text-purple-400">📰 Agente Sentimiento (NLP)</p>
-                            <p class="text-[10px] text-gray-300 mt-1 leading-tight">Lee y califica noticias en vivo (Google News/CoinDesk) dándoles un puntaje de -1 a 1 para evitar comprar cuando hay pánico mediático.</p>
+                            <p class="text-[10px] text-gray-300 mt-1 leading-tight">Consulta noticias y entrega un puntaje de -1 a 1 al motor de análisis. Al apagarlo, se detienen las consultas y el puntaje enviado pasa a cero.</p>
                         </div>
-                        <label class="relative inline-flex items-center cursor-pointer mt-1">
+                        <label class="relative inline-flex items-center cursor-pointer mt-1" title="Activar o detener consultas de sentimiento">
                             <input type="checkbox" checked id="sentimentToggle" class="sr-only peer">
                             <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
                         </label>
@@ -852,7 +887,8 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=22"></script>
+    <script src="js/trading_guards.js?v=4"></script>
+    <script src="js/app.js?v=26"></script>
     </div>
 </body>
 </html>

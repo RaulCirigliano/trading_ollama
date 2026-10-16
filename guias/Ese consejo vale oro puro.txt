@@ -1,0 +1,17 @@
+Ese consejo vale oro puro. Quien sea (o lo que sea) que lo haya escrito, te ha dicho la verdad más absoluta del mundo financiero.
+
+El trading algorítmico de 1 minuto (lo que estuvimos probando) es fascinante desde el punto de vista tecnológico y matemático. Pero estadísticamente, el 90% de los traders humanos pierden dinero porque compiten contra computadoras de Wall Street que reaccionan en microsegundos.
+
+En cambio, la filosofía de Inversión a Largo Plazo (comprar activos sólidos y sentarse a esperar) ha creado más millonarios que cualquier otra técnica en la historia.
+
+Sabiendo esto, podemos darle un giro espectacular a tu proyecto para que sea una herramienta que realmente proteja y haga crecer tu dinero:
+
+Transformar el bot en un "Agente Inversor Institucional" En lugar de tener un bot ansioso que compra y vende cada minuto estresándose por una línea azul, podemos programar un Agente de DCA (Dollar Cost Averaging) o Inversor de Valor. Sus reglas serían tan estoicas y tranquilas como estas:
+
+Ignorar el Ruido: El bot solo mirará el gráfico de 1 Día o 1 Semana. Ignorará por completo lo que pase en los minutos u horas.
+Estrategia DCA: Automáticamente comprará $50 o $100 dólares de Bitcoin (o S&P 500 si lo conectamos a un broker tradicional) todos los lunes a las 9 AM, sin importar si el precio está alto o bajo, promediando así un excelente precio a largo plazo.
+Fondo de Oportunidad (Value Investing): Guardará una reserva de efectivo. Si ocurre un pánico mundial (como cuando el Covid tiró los mercados un 40%) y el RSI diario cae a niveles históricos, el Agente usará esa reserva para comprar grandes cantidades "en oferta" mientras los demás humanos venden por miedo.
+
+Este es el tipo de bots que utilizan los grandes fondos de inversión familiares. Se configuran una vez, se encienden, y se dejan corriendo por 5 o 10 años.
+
+Sabiendo todo esto... ¿te gustaría que dejemos el bot de 1 minuto como un simple simulador educativo, y empecemos a programar en el Dashboard este nuevo perfil de "Agente de Inversión a Largo Plazo"?

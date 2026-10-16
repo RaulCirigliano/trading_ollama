@@ -1,0 +1,54 @@
+Sí, veo una serie de agentes y roles configurados, tanto en el código como en la interfaz. La precisión importante es que no todos son agentes autónomos que deliberan juntos: algunos son servicios externos, otros son motores alternativos y otros son procesos del simulador.
+
+El flujo que entiendo es:
+
+Monitor del Mercado: proyecto satélite que envía oportunidades al puente macro de esta aplicación.
+Antigravity CIO: hay una skill configurada para auditar esas oportunidades y, si corresponde, inyectar una tesis mediante el puente local (SKILL.md, script de integración).
+Agente de Inversiones / Radar Macro: presenta y gestiona recomendaciones macro en el dashboard (index.html).
+Cerebro de análisis: usa el motor seleccionado —por ejemplo, Qwen/Ollama, Gemini o el motor matemático— para evaluar el activo y producir una señal (selector del motor, análisis del backend).
+Agente de Sentimiento y rutina Pre-Market: aportan análisis de noticias y contexto, por separado del ciclo de señales (sentimiento, rutina Pre-Market).
+Agente de Riesgo: observa las posiciones del simulador y evalúa stops y objetivos (risk tick).
+Así que sí: el proyecto tiene una arquitectura multiagente en sentido amplio. Pero, por lo que vi, el Monitor/CIO aporta contexto y el motor elegido produce la señal; Qwen, Gemini y el motor cuantitativo no parecen votar todos juntos en cada decisión. Tampoco interpretaría el porcentaje de confianza de una recomendación como una probabilidad estadística de acierto sin una calibración demostrada.
+
+Sí, tienes razón. El proyecto incluye un agente cuantitativo que analiza el mercado mediante reglas matemáticas programadas, sin depender de un LLM para esa evaluación. Está descrito como “Agente Cuantitativo (Quants)” en el dashboard (index.html) y su lógica está en la ruta engine == "local" del backend (main.py): evalúa indicadores como cruces MACD, VWAP, RSI y bandas de Bollinger para producir señales.
+
+La precisión que quise señalar es que “Agente Cuantitativo” es el nombre del rol en la interfaz; en el flujo de decisión es un motor matemático seleccionable, no necesariamente un agente paralelo que revise cada decisión de Qwen y vote con él. Así que corrijo mi descripción: hay un agente cuantitativo basado en código, y su análisis puede funcionar sin un modelo de lenguaje; que además actúe como revisor simultáneo depende de cómo esté conectado el flujo
+
+Sí. Lo definiría así, distinguiendo qué hace hoy el código de cómo la interfaz puede dar la impresión de que todos los agentes están siempre colaborando.
+
+Roles y relación entre componentes
+Agente o componente	Qué hace	Si trabaja solo
+Agente Cuantitativo	Analiza velas reales mediante reglas matemáticas: cruces MACD, relación con VWAP, RSI y bandas de Bollinger. El backend lo selecciona como motor “Modelo Matemático Local” (main.py).	Puede evaluar el mercado y generar COMPRAR, VENDER o MANTENER sin un LLM. No abre operaciones por sí mismo: el modo de ejecución decide si la señal se simula directamente o se presenta para aprobación.
+Cerebro LLM: Qwen, Ollama, DeepSeek o Gemini	El selector elige un motor por análisis. Recibe indicadores calculados por el backend y también contexto de sentimiento y macro; produce la señal y una justificación (selector del motor, análisis del backend).	Puede ser el decisor principal del ciclo. No es una votación entre Qwen y el motor cuantitativo: los modelos son alternativas seleccionables, no revisores simultáneos obligatorios.
+Agente de Sentimiento	Obtiene noticias y un puntaje de sentimiento; ese puntaje se envía como contexto al motor LLM. La consulta se actualiza periódicamente (actualización de sentimiento).	Por sí solo no produce una orden de trading: aporta una lectura de noticias. Con el motor matemático local seleccionado, el puntaje no participa en las reglas de entrada que revisé.
+Agente de Inversiones / Radar Macro	Consulta recomendaciones macro según la fuente elegida: nativa, Monitor o híbrida; las muestra como tarjetas de oportunidad o peligro (radar).	Puede informar sin operar. En modo manual, la tesis requiere que el usuario la aplique. En modo inteligente puede orientar el activo que se analiza, pero no convierte por sí misma una recomendación en señal de compra.
+Monitor del Mercado	Es una fuente externa/satélite que puede enviar alertas al puente macro de este proyecto.	Puede producir recomendaciones que el dashboard presenta. No es el motor que ejecuta las operaciones simuladas.
+Antigravity CIO	Hay una skill que audita tesis del Monitor o prepara una tesis propia y la inyecta al puente (skill).	Actúa como asesor externo; no es un proceso que el backend mantenga corriendo continuamente.
+Agente de Riesgo	Vigila la posición simulada y evalúa stops, breakeven, trailing stop y take profit cada dos segundos (monitor de riesgo).	No busca entradas ni abre posiciones: protege una posición simulada ya existente. Esa supervisión depende de que el dashboard siga ejecutándose.
+Cerebro Pre-Market	Genera un reporte previo usando datos del buzón y titulares, con el motor seleccionado en el Lobby (prompt y flujo Pre-Market).	Puede generar un resumen macro, pero no es el ciclo normal que vigila una posición y ejecuta una operación simulada.
+Qué significan los modos del dashboard
+Fijo: analiza el activo que está seleccionado. No significa “modo manual”: la ejecución todavía puede ser autónoma o requerir aprobación.
+Inteligente / multi-activo: permite que una directiva macro guíe el cambio de activo; el código bloquea el auto-ruteo si ya hay una posición abierta. Luego el motor seleccionado hace el análisis técnico.
+Copiloto: presenta una señal admisible para que el usuario confirme o rechace.
+Trading Autónomo: permite que una señal COMPRAR o VENDER aceptada se ejecute en la cuenta simulada sin pedir confirmación.
+Smart en ejecución: combina auto-ruteo multi-activo con ejecución automática simulada; no es un motor de análisis distinto.
+Activar Agente: inicia o detiene el ciclo de análisis. No equivale a encender o apagar por separado todos los roles del panel.
+En todos estos casos, el sistema evalúa datos de un mercado real, pero modifica la cartera simulada local; no envía órdenes a un broker real.
+
+Un detalle importante sobre los interruptores
+En el código actual encontré diferencias entre lo que aparentan controlar algunos switches y su efecto real:
+
+El interruptor del Agente Cuantitativo aparece marcado, pero no encontré un identificador o manejador que lo conecte a las reglas. Para usar el modelo matemático, la selección real es Modelo Matemático Local en el selector de motor.
+El interruptor de Sentimiento tampoco aparece conectado a la actualización ni al uso del puntaje: el sentimiento se consulta y se pasa como contexto independientemente de ese switch.
+El interruptor de Inversiones habilita o deshabilita las consultas/renderizado del Radar, pero el sondeo de directivas inyectadas corre aparte. Por eso apagar ese interruptor no necesariamente equivale a impedir que una directiva ya inyectada influya en el modo inteligente.
+El Agente de Riesgo está marcado como obligatorio y deshabilitado para el usuario, pero su vigilancia corre en el frontend; al cerrar la pestaña, deja de evaluar precios.
+Esto no cambia la separación conceptual de roles, pero significa que no todos los switches actualmente ofrecen un control independiente completo.
+
+Ejemplos de uso por separado
+Solo cuantitativo: elegir Modelo Matemático Local, modo fijo y copiloto o autónomo. Analiza reglas técnicas; sin LLM ni asesoría macro como decisores.
+Solo LLM: elegir Qwen/Ollama/DeepSeek/Gemini y modo fijo. El modelo recibe indicadores, sentimiento y el texto macro que esté en contexto, y recomienda una señal. No es consenso con el agente cuantitativo.
+Solo macro: habilitar el Radar y consultar noticias/directivas, pero mantener el agente de trading apagado. Se reciben tesis; no debería abrirse una posición automáticamente.
+Macro + análisis cuantitativo: activar modo inteligente, tener una directiva disponible y seleccionar el motor matemático local. La tesis orienta el activo; el código matemático decide la señal técnica; el modo de ejecución determina si se pide aprobación o se simula directamente.
+Macro + LLM: modo inteligente y un motor LLM seleccionado. La directiva y los indicadores llegan al prompt del modelo; el modelo recomendado sigue siendo solo uno por ciclo.
+Solo riesgo: no abre operaciones; únicamente vigila y puede cerrar una posición simulada existente conforme a sus reglas.
+Resumen: la arquitectura tiene varios roles, pero no es una deliberación en la que todos analizan y votan cada trade. El flujo principal es: macro orienta (opcional) → un motor seleccionado recomienda → el modo de ejecución pide aprobación o actualiza la cuenta simulada → el agente de riesgo vigila la posición. Además, hoy algunos interruptores del panel parecen decorativos o solo afectan una parte del flujo, así que no asumiría que “apagado” siempre significa que ese rol deja de influir.
